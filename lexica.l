@@ -10,6 +10,7 @@ NUM_DEC     {DIGITO}+"."{DIGITO}+
 
 %%
 
+// Tipos
 "OCTETO"           { return OCTETO; }
 "OCTETO_SSINAL"    { return OCTETO_SSINAL; }
 "CURTO"            { return CURTO; }
@@ -25,37 +26,54 @@ NUM_DEC     {DIGITO}+"."{DIGITO}+
 "CARACTERES"       { return CARACTERES; }
 "BOOLEANO"         { return BOOLEANO; }
 
+// Palavras-chave
 "se"               { return SE; }
 "senao"            { return SENAO; }
 "enquanto"         { return ENQUANTO; }
 "para"             { return PARA; }
 "retorna"          { return RETORNA; }
 
+// Booleanos
+"verdadeiro"       { return VERDADEIRO; }
+"falso"            { return FALSO; }
+
+// Conversão (opcional, se for usar)
+"converte_para"    { return CONVERTE_PARA; }
+"como"             { return COMO; }
+
 // Comentários
 "#".*                     { /* ignora comentário de linha */ }
 "//".*                    { /* ignora comentário de linha */ }
 /\*([^*]|\*+[^*/])*\*/     { /* ignora comentário de bloco */ }
 
+// Literais e identificadores
 {NUM_INT}          { yylval.intval = atoi(yytext); return NUM_INT; }
 {NUM_DEC}          { yylval.fval = atof(yytext); return NUM_DEC; }
 \"([^\\\"]|\\.)*\" { yylval.sval = strdup(yytext); return STRING; }
 {IDENT}            { yylval.sval = strdup(yytext); return IDENT; }
 
+// Operadores relacionais
 "=="               { return IGUAL; }
 "!="               { return DIFERENTE; }
 "<="               { return MENOR_IGUAL; }
 ">="               { return MAIOR_IGUAL; }
+"<"                { return MENOR; }
+">"                { return MAIOR; }
+
+// Operadores lógicos
 "&&"               { return E_LOGICO; }
 "||"               { return OU_LOGICO; }
 "!"                { return NAO_LOGICO; }
+
+// Operadores aritméticos e outros
 "="                { return ATRIB; }
-"<"                { return MENOR; }
-">"                { return MAIOR; }
 "+"                { return MAIS; }
 "-"                { return MENOS; }
 "*"                { return MULT; }
 "/"                { return DIV; }
 "%"                { return MOD; }
+
+// Pontuação
 ";"                { return PONTO_VIRG; }
 ","                { return VIRG; }
 "("                { return ABRE_P; }
@@ -63,10 +81,14 @@ NUM_DEC     {DIGITO}+"."{DIGITO}+
 "{"                { return ABRE_CH; }
 "}"                { return FECHA_CH; }
 
+// Espaços
 [ \t\n\r]+         { /* ignora espaços em branco */ }
+
+// Qualquer outro caractere
 .                  { return yytext[0]; }
 
 %%
 
 int yywrap() { return 1; }
+
 
