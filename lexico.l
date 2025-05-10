@@ -1,15 +1,18 @@
 %{
-using System;
+#include "sintatico.tab.h"
+#include <stdlib.h> // Para atoi
 %}
 
-DIGITO [0-9]+
-
 %%
 
-{DIGITO}     { yylval = int.Parse(yytext); return NUMERO; }
-"+"          { return SOMA; }
-[ \t\n]+     { /* ignora espaços e quebras de linha */ }
+[0-9]+        { yylval.ival = atoi(yytext); return NUM; }
+[ \t\r\n]+    ;  // ignora espaços e quebras de linha
+"+"           { return MAIS; }
+";"           { return PONTOVIRG; }
 
-.            { Console.WriteLine($"Caractere inválido: {yytext}"); }
+.             { printf("Caractere inválido: %s\n", yytext); return 0; }
 
 %%
+int yywrap() {
+    return 1;
+}
