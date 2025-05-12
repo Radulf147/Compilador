@@ -1,65 +1,95 @@
 %{
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-int tempVar = 1;
-
-void gera(char* instr, char* a, char* b, char* result) {
-    printf("%s = %s %s %s;\n", result, a, instr, b);
+extern int yylex();
+void yyerror(const char *s) {
+    fprintf(stderr, "Erro: %s\n", s);
 }
 
-void geraAtrib(char* a, char* b) {
-    printf("%s = %s;\n", a, b);
-}
+typedef struct Simbolo {
+    char nome[50];
+    int endereco;
+} Simbolo;
 
-char* novaTemp() {
-    char* nome = malloc(10);
-    sprintf(nome, "T%d", tempVar++);
-    return nome;
+Simbolo tabela[100];
+int contador = 0;
+int temp_count = 1;
+
+int adicionar_simbolo(char *nome) {
+    for (int i = 0; i < contador; i++) {
+        if (strcmp(tabela[i].nome, nome) == 0) {
+            return tabela[i].endereco;
+        }
+    }
+    strcpy(tabela[contador].nome, nome);
+    tabela[contador].endereco = temp_count++;
+    return tabela[contador++].endereco;
 }
 %}
 
 %union {
     int ival;
-    char* str;
+    char *str;
 }
 
 %token <ival> NUM
-%token MAIS
-%token PONTOVIRG
+%token <str> ID
+%token ATRIB
+%token MAIS MENOS VEZES DIV
+%token ABRE_P FECHA_P
+%token TIPO
 
-%left MAIS
+%left MAIS MENOS
+%left VEZES DIV
 
-%type <str> expressao
-
-%%
-
-programa:
-    expressao PONTOVIRG { printf("// Fim do programa\n"); }
-;
-
-expressao:
-    NUM                     {
-                              char* temp = novaTemp();
-                              printf("%s = %d;\n", temp, $1);
-                              $$ = temp;
-                            }
-  | expressao MAIS expressao {
-                              char* temp = novaTemp();
-                              gera("+", $1, $3, temp);
-                              $$ = temp;
-                            }
-;
+%type <ival> expr
 
 %%
-int yylex(void);
-int yyerror(char* s);
+
+programa: decl atribuicao
+;
+
+decl: TIPO ID ';' {
+    int endereco = adicionar_simbolo($2);
+    printf("// Declarando variável %s em T%d\n", $2, endereco);
+    printf("int T%d;\n", endereco);
+}
+;
+
+atribuicao: ID ATRIB expr ';' {
+    int endereco = adicionar_simbolo($1);
+    printf("T%d = T%d;\n", endereco, $3);
+}
+;
+
+expr: expr MAIS expr {
+    int temp = temp_count++;
+    printf("int T%d;\n", temp);
+    printf("T%d = T%d + T%d;\n", temp, $1, $3);
+    $$ = temp;
+}
+| expr VEZES expr {
+    int temp = temp_count++;
+    printf("int T%d;\n", temp);
+    printf("T%d = T%d * T%d;\n", temp, $1, $3);
+    $$ = temp;
+}
+| NUM {
+    int temp = temp_count++;
+    printf("int T%d;\n", temp);
+    printf("T%d = %d;\n", temp, $1);
+    $$ = temp;
+}
+| ID {
+    $$ = adicionar_simbolo($1);
+}
+;
+
+%%
 
 int main() {
-    return yyparse();
-}
-
-int yyerror(char* s) {
-    fprintf(stderr, "Erro: %s\n", s);
-    return 1;
+    yyparse();
+    return 0;
 }
