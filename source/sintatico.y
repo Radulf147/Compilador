@@ -118,27 +118,59 @@ atribuicao:
 ;
 
 expr:
-    expr MAIS expr {
-        int res = temp_count++;
-        char tipo[10];
-        if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
-            printf("float T%d;\n", res);
-            strcpy(tipo, "float");
-        } else {
-            printf("int T%d;\n", res);
-            strcpy(tipo, "int");
+     expr MAIS expr {
+    int res = temp_count++;
+    int t1 = $1.temp_id;
+    int t3 = $3.temp_id;
+    char tipo[10];
+
+    // Conversão de tipos, se necessário
+    if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
+        strcpy(tipo, "float");
+
+        if (strcmp($1.tipo, "int") == 0) {
+            int cast_temp = temp_count++;
+            printf("float T%d;\n", cast_temp);
+            printf("T%d = (float) T%d;\n", cast_temp, $1.temp_id);
+            t1 = cast_temp;
         }
-        printf("T%d = T%d + T%d;\n", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, tipo);
-        $$.nome[0] = '\0';
+        if (strcmp($3.tipo, "int") == 0) {
+            int cast_temp = temp_count++;
+            printf("float T%d;\n", cast_temp);
+            printf("T%d = (float) T%d;\n", cast_temp, $3.temp_id);
+            t3 = cast_temp;
+        }
+
+        printf("float T%d;\n", res);
+    } else {
+        strcpy(tipo, "int");
+        printf("int T%d;\n", res);
     }
+
+    printf("T%d = T%d + T%d;\n", res, t1, t3);
+    $$.temp_id = res;
+    strcpy($$.tipo, tipo);
+    $$.nome[0] = '\0';
+}
+
   | expr MENOS expr {
         int res = temp_count++;
         char tipo[10];
         if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
-            printf("float T%d;\n", res);
-            strcpy(tipo, "float");
+            // Conversão explícita de int para float
+            if (strcmp($1.tipo, "int") == 0) {
+                printf("float T%d;\n", res);
+                printf("T%d = (float) T%d;\n", res, $1.temp_id);
+                strcpy(tipo, "float");
+            } else if (strcmp($3.tipo, "int") == 0) {
+                printf("float T%d;\n", res);
+                printf("T%d = (float) T%d;\n", res, $3.temp_id);
+                strcpy(tipo, "float");
+            }
+            else {
+                printf("float T%d;\n", res);
+                strcpy(tipo, "float");
+            }
         } else {
             printf("int T%d;\n", res);
             strcpy(tipo, "int");
@@ -152,8 +184,20 @@ expr:
         int res = temp_count++;
         char tipo[10];
         if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
-            printf("float T%d;\n", res);
-            strcpy(tipo, "float");
+            // Conversão explícita de int para float
+            if (strcmp($1.tipo, "int") == 0) {
+                printf("float T%d;\n", res);
+                printf("T%d = (float) T%d;\n", res, $1.temp_id);
+                strcpy(tipo, "float");
+            } else if (strcmp($3.tipo, "int") == 0) {
+                printf("float T%d;\n", res);
+                printf("T%d = (float) T%d;\n", res, $3.temp_id);
+                strcpy(tipo, "float");
+            }
+            else {
+                printf("float T%d;\n", res);
+                strcpy(tipo, "float");
+            }
         } else {
             printf("int T%d;\n", res);
             strcpy(tipo, "int");
@@ -167,8 +211,20 @@ expr:
         int res = temp_count++;
         char tipo[10];
         if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
-            printf("float T%d;\n", res);
-            strcpy(tipo, "float");
+            // Conversão explícita de int para float
+            if (strcmp($1.tipo, "int") == 0) {
+                printf("float T%d;\n", res);
+                printf("T%d = (float) T%d;\n", res, $1.temp_id);
+                strcpy(tipo, "float");
+            } else if (strcmp($3.tipo, "int") == 0) {
+                printf("float T%d;\n", res);
+                printf("T%d = (float) T%d;\n", res, $3.temp_id);
+                strcpy(tipo, "float");
+            }
+            else {
+                printf("float T%d;\n", res);
+                strcpy(tipo, "float");
+            }
         } else {
             printf("int T%d;\n", res);
             strcpy(tipo, "int");
