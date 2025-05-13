@@ -3,34 +3,36 @@
 #include <string.h>
 %}
 
-DIGITO   [0-9]
-LETRA    [a-zA-Z_]
-ESPACO   [ \t\n\r]
-
 %%
 
-int         { yylval.str = strdup("int"); return TIPO; }
-float       { yylval.str = strdup("float"); return TIPO; }
+"int"     { yylval.str = "int"; return TIPO; }
+"float"   { yylval.str = "float"; return TIPO; }
+"char"    { yylval.str = "char"; return TIPO; }
+"bool"    { yylval.str = "bool"; return TIPO; }
 
-{LETRA}({LETRA}|{DIGITO})*    { yylval.str = strdup(yytext); return ID; }
-{DIGITO}+"."{DIGITO}+         { yylval.fval = atof(yytext); return FNUM; }
-{DIGITO}+                     { yylval.ival = atoi(yytext); return NUM; }
+"true"    { yylval.ival = 1; return BOOLLIT; }
+"false"   { yylval.ival = 0; return BOOLLIT; }
 
-"+"         { return MAIS; }
-"-"         { return MENOS; }
-"*"         { return VEZES; }
-"/"         { return DIV; }
-"="         { return ATRIB; }
-"("         { return ABRE_P; }
-")"         { return FECHA_P; }
+"="       { return ATRIB; }
+"+"       { return MAIS; }
+"-"       { return MENOS; }
+"*"       { return VEZES; }
+"/"       { return DIV; }
+"("       { return ABRE_P; }
+")"       { return FECHA_P; }
 ";"         { return ';'; }
 
-{ESPACO}    ; // ignora espaços
+[0-9]+"."[0-9]+   { yylval.fval = atof(yytext); return FNUM; }
+[0-9]+            { yylval.ival = atoi(yytext); return NUM; }
+\'[^\']\'         { yylval.str = strdup(yytext); return CARACTERE; }
 
-.           { printf("Caractere inesperado: %s\n", yytext); return -1; }
+[a-zA-Z_][a-zA-Z0-9_]*  { yylval.str = strdup(yytext); return ID; }
+
+[ \t\n]  // Ignora espaços e quebras de linha
+
+.        { printf("Caractere não reconhecido: %s\n", yytext); return 0; }
 
 %%
-
 int yywrap(void) {
     return 1;
 }

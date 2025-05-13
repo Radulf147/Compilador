@@ -46,7 +46,7 @@ char* obter_tipo(char *nome) {
             return tabela[i].tipo;
         }
     }
-    fprintf(stderr, "Erro: Tipo da variável '%s' não encontrado.\n", nome);
+    fprintf(stderr, "Erro: Tipo da variavel '%s' nao encontrado.\n", nome);
     exit(1);
 }
 %}
@@ -66,9 +66,11 @@ char* obter_tipo(char *nome) {
 %token <fval> FNUM
 %token <str> ID
 %token <str> TIPO
+%token <str> CARACTERE
 %token ATRIB
 %token MAIS MENOS VEZES DIV
 %token ABRE_P FECHA_P
+%token <ival> BOOLLIT
 
 %left MAIS MENOS
 %left VEZES DIV
@@ -77,8 +79,7 @@ char* obter_tipo(char *nome) {
 
 %%
 
-programa: lista_comandos
-;
+programa: lista_comandos ;
 
 lista_comandos:
     lista_comandos comando
@@ -102,16 +103,12 @@ atribuicao:
         int endereco = obter_endereco($1);
         char* tipo_var = obter_tipo($1);
         if (strcmp(tipo_var, $3.tipo) != 0) {
-            printf("// Aviso: conversão de tipo de %s para %s\n", $3.tipo, tipo_var);
+            printf("// Aviso: conversao de tipo de %s para %s\n", $3.tipo, tipo_var);
         }
-
-        if (strlen($3.nome) > 0) {
-            printf("T%d = T%d;\n", endereco, $3.temp_id);
-            printf("%s = T%d;\n", $1, endereco); // variável nomeada
-        } else {
-            printf("%s = T%d;\n", $1, $3.temp_id);
-        }
+        printf("T%d = T%d;\n", endereco, $3.temp_id);
+        printf("%s = T%d;\n", $1, endereco);
     }
+
 ;
 
 expr:
@@ -130,6 +127,15 @@ expr:
         strcpy($$.tipo, tipo);
         $$.nome[0] = '\0';
     }
+  | BOOLLIT {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        printf("T%d = %d;\n", res, $1);  // $1 = 1 (true) ou 0 (false)
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+
   | expr MENOS expr {
         int res = temp_count++;
         char tipo[10];
@@ -196,11 +202,20 @@ expr:
         strcpy($$.tipo, "float");
         $$.nome[0] = '\0';
     }
+    | CARACTERE {
+        int res = temp_count++;
+        printf("char T%d;\n", res);
+        printf("T%d = %s;\n", res, $1);
+        $$.temp_id = res;
+        strcpy($$.tipo, "char");
+        $$.nome[0] = '\0';
+    }
+
   | ID {
         int endereco = obter_endereco($1);
         strcpy($$.tipo, obter_tipo($1));
         $$.temp_id = endereco;
-        strcpy($$.nome, $1);  // agora sabemos que veio de uma variável
+        strcpy($$.nome, $1);
     }
 ;
 
