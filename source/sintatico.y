@@ -58,7 +58,7 @@ char* obter_tipo(char *nome) {
     struct {
         int temp_id;
         char tipo[10];
-        char nome[50]; // variável associada (se houver)
+        char nome[50];
     } expr_attr;
 }
 
@@ -72,8 +72,11 @@ char* obter_tipo(char *nome) {
 %token ABRE_P FECHA_P
 %token <ival> BOOLLIT
 
+%token MENOR MAIOR MENORIG IGUAL MAIORIG DIF
+
 %left MAIS MENOS
 %left VEZES DIV
+%left MENOR MAIOR MENORIG MAIORIG IGUAL DIF
 
 %type <expr_attr> expr
 
@@ -108,7 +111,6 @@ atribuicao:
         printf("T%d = T%d;\n", endereco, $3.temp_id);
         printf("%s = T%d;\n", $1, endereco);
     }
-
 ;
 
 expr:
@@ -127,15 +129,6 @@ expr:
         strcpy($$.tipo, tipo);
         $$.nome[0] = '\0';
     }
-  | BOOLLIT {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        printf("T%d = %d;\n", res, $1);  // $1 = 1 (true) ou 0 (false)
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-
   | expr MENOS expr {
         int res = temp_count++;
         char tipo[10];
@@ -181,6 +174,57 @@ expr:
         strcpy($$.tipo, tipo);
         $$.nome[0] = '\0';
     }
+
+  // Relacionais
+  | expr MENOR expr {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        printf("T%d = T%d < T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+  | expr MAIOR expr {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        printf("T%d = T%d > T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+  | expr MENORIG expr {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        printf("T%d = T%d <= T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+  | expr MAIORIG expr {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        printf("T%d = T%d >= T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+  | expr IGUAL expr {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        printf("T%d = T%d == T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+  | expr DIF expr {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        printf("T%d = T%d != T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+
   | ABRE_P expr FECHA_P {
         $$.temp_id = $2.temp_id;
         strcpy($$.tipo, $2.tipo);
@@ -202,7 +246,7 @@ expr:
         strcpy($$.tipo, "float");
         $$.nome[0] = '\0';
     }
-    | CARACTERE {
+  | CARACTERE {
         int res = temp_count++;
         printf("char T%d;\n", res);
         printf("T%d = %s;\n", res, $1);
@@ -210,7 +254,14 @@ expr:
         strcpy($$.tipo, "char");
         $$.nome[0] = '\0';
     }
-
+  | BOOLLIT {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        printf("T%d = %d;\n", res, $1);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
   | ID {
         int endereco = obter_endereco($1);
         strcpy($$.tipo, obter_tipo($1));

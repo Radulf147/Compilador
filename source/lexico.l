@@ -13,6 +13,13 @@
 "true"    { yylval.ival = 1; return BOOLLIT; }
 "false"   { yylval.ival = 0; return BOOLLIT; }
 
+"<"      { return MENOR; }
+"<="     { return MENORIG; }
+">"      { return MAIOR; }
+">="     { return MAIORIG; }
+"=="     { return IGUAL; }
+"!="     { return DIF; }
+
 "="       { return ATRIB; }
 "+"       { return MAIS; }
 "-"       { return MENOS; }
@@ -20,7 +27,7 @@
 "/"       { return DIV; }
 "("       { return ABRE_P; }
 ")"       { return FECHA_P; }
-";"         { return ';'; }
+";"       { return ';'; }
 
 [0-9]+"."[0-9]+   { yylval.fval = atof(yytext); return FNUM; }
 [0-9]+            { yylval.ival = atoi(yytext); return NUM; }
@@ -33,6 +40,7 @@
 .        { printf("Caractere não reconhecido: %s\n", yytext); return 0; }
 
 %%
+
 int yywrap(void) {
     return 1;
 }

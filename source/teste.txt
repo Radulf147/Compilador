@@ -1,2 +1,4 @@
-int A;
-A = (A + 2) * 3.0;
+bool B1;
+bool B2;
+bool R;
+R = B1 && !B2;
