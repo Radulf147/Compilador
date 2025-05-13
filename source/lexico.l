@@ -1,7 +1,6 @@
 %{
 #include "sintatico.tab.h"
 #include <string.h>
-#include <stdlib.h> // necessário para atof
 %}
 
 DIGITO   [0-9]
@@ -14,8 +13,8 @@ int         { yylval.str = strdup("int"); return TIPO; }
 float       { yylval.str = strdup("float"); return TIPO; }
 
 {LETRA}({LETRA}|{DIGITO})*    { yylval.str = strdup(yytext); return ID; }
+{DIGITO}+"."{DIGITO}+         { yylval.fval = atof(yytext); return FNUM; }
 {DIGITO}+                     { yylval.ival = atoi(yytext); return NUM; }
-{DIGITO}+"."{DIGITO}+         { yylval.fval = atof(yytext); return FNUM; }  // <-- Adicionado
 
 "+"         { return MAIS; }
 "-"         { return MENOS; }
