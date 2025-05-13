@@ -73,10 +73,14 @@ char* obter_tipo(char *nome) {
 %token <ival> BOOLLIT
 
 %token MENOR MAIOR MENORIG IGUAL MAIORIG DIF
+%token AND OR NOT
 
+%left OR
+%left AND
 %left MAIS MENOS
 %left VEZES DIV
 %left MENOR MAIOR MENORIG MAIORIG IGUAL DIF
+%right NOT
 
 %type <expr_attr> expr
 
@@ -175,7 +179,40 @@ expr:
         $$.nome[0] = '\0';
     }
 
-  // Relacionais
+  | expr AND expr {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        if (strcmp($1.tipo, "bool") != 0 || strcmp($3.tipo, "bool") != 0) {
+            printf("// Erro: operadores AND requerem bool, recebido %s e %s\n", $1.tipo, $3.tipo);
+        }
+        printf("T%d = T%d && T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+  | expr OR expr {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        if (strcmp($1.tipo, "bool") != 0 || strcmp($3.tipo, "bool") != 0) {
+            printf("// Erro: operadores OR requerem bool, recebido %s e %s\n", $1.tipo, $3.tipo);
+        }
+        printf("T%d = T%d || T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+  | NOT expr {
+        int res = temp_count++;
+        printf("int T%d;\n", res);
+        if (strcmp($2.tipo, "bool") != 0) {
+            printf("// Erro: operador NOT requer bool, recebido %s\n", $2.tipo);
+        }
+        printf("T%d = !T%d;\n", res, $2.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+        $$.nome[0] = '\0';
+    }
+
   | expr MENOR expr {
         int res = temp_count++;
         printf("int T%d;\n", res);

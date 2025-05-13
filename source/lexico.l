@@ -13,6 +13,10 @@
 "true"    { yylval.ival = 1; return BOOLLIT; }
 "false"   { yylval.ival = 0; return BOOLLIT; }
 
+"&&"      { return AND; }
+"||"      { return OR; }
+"!"       { return NOT; }
+
 "<"      { return MENOR; }
 "<="     { return MENORIG; }
 ">"      { return MAIOR; }
