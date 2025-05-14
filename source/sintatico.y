@@ -72,17 +72,10 @@ char* obter_tipo(char *nome) {
 %token ABRE_P FECHA_P
 %token <ival> BOOLLIT
 
-%token MENOR MAIOR MENORIG IGUAL MAIORIG DIF
-%token AND OR NOT
-
-%left OR
-%left AND
 %left MAIS MENOS
 %left VEZES DIV
-%left MENOR MAIOR MENORIG MAIORIG IGUAL DIF
-%right NOT
 
-%type <expr_attr> expr
+%type <expr_attr> expr fator
 
 %%
 
@@ -96,6 +89,9 @@ lista_comandos:
 comando:
     decl
   | atribuicao
+  | expr ';' {
+        printf("// Resultado em T%d do tipo %s\n", $1.temp_id, $1.tipo);
+    }
 ;
 
 decl:
@@ -118,59 +114,27 @@ atribuicao:
 ;
 
 expr:
-     expr MAIS expr {
-    int res = temp_count++;
-    int t1 = $1.temp_id;
-    int t3 = $3.temp_id;
-    char tipo[10];
-
-    // Conversão de tipos, se necessário
-    if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
-        strcpy(tipo, "float");
-
-        if (strcmp($1.tipo, "int") == 0) {
-            int cast_temp = temp_count++;
-            printf("float T%d;\n", cast_temp);
-            printf("T%d = (float) T%d;\n", cast_temp, $1.temp_id);
-            t1 = cast_temp;
+    expr MAIS expr {
+        int res = temp_count++;
+        char tipo[10];
+        if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
+            printf("float T%d;\n", res);
+            strcpy(tipo, "float");
+        } else {
+            printf("int T%d;\n", res);
+            strcpy(tipo, "int");
         }
-        if (strcmp($3.tipo, "int") == 0) {
-            int cast_temp = temp_count++;
-            printf("float T%d;\n", cast_temp);
-            printf("T%d = (float) T%d;\n", cast_temp, $3.temp_id);
-            t3 = cast_temp;
-        }
-
-        printf("float T%d;\n", res);
-    } else {
-        strcpy(tipo, "int");
-        printf("int T%d;\n", res);
+        printf("T%d = T%d + T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, tipo);
+        $$.nome[0] = '\0';
     }
-
-    printf("T%d = T%d + T%d;\n", res, t1, t3);
-    $$.temp_id = res;
-    strcpy($$.tipo, tipo);
-    $$.nome[0] = '\0';
-}
-
   | expr MENOS expr {
         int res = temp_count++;
         char tipo[10];
         if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
-            // Conversão explícita de int para float
-            if (strcmp($1.tipo, "int") == 0) {
-                printf("float T%d;\n", res);
-                printf("T%d = (float) T%d;\n", res, $1.temp_id);
-                strcpy(tipo, "float");
-            } else if (strcmp($3.tipo, "int") == 0) {
-                printf("float T%d;\n", res);
-                printf("T%d = (float) T%d;\n", res, $3.temp_id);
-                strcpy(tipo, "float");
-            }
-            else {
-                printf("float T%d;\n", res);
-                strcpy(tipo, "float");
-            }
+            printf("float T%d;\n", res);
+            strcpy(tipo, "float");
         } else {
             printf("int T%d;\n", res);
             strcpy(tipo, "int");
@@ -184,20 +148,8 @@ expr:
         int res = temp_count++;
         char tipo[10];
         if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
-            // Conversão explícita de int para float
-            if (strcmp($1.tipo, "int") == 0) {
-                printf("float T%d;\n", res);
-                printf("T%d = (float) T%d;\n", res, $1.temp_id);
-                strcpy(tipo, "float");
-            } else if (strcmp($3.tipo, "int") == 0) {
-                printf("float T%d;\n", res);
-                printf("T%d = (float) T%d;\n", res, $3.temp_id);
-                strcpy(tipo, "float");
-            }
-            else {
-                printf("float T%d;\n", res);
-                strcpy(tipo, "float");
-            }
+            printf("float T%d;\n", res);
+            strcpy(tipo, "float");
         } else {
             printf("int T%d;\n", res);
             strcpy(tipo, "int");
@@ -211,20 +163,8 @@ expr:
         int res = temp_count++;
         char tipo[10];
         if (strcmp($1.tipo, "float") == 0 || strcmp($3.tipo, "float") == 0) {
-            // Conversão explícita de int para float
-            if (strcmp($1.tipo, "int") == 0) {
-                printf("float T%d;\n", res);
-                printf("T%d = (float) T%d;\n", res, $1.temp_id);
-                strcpy(tipo, "float");
-            } else if (strcmp($3.tipo, "int") == 0) {
-                printf("float T%d;\n", res);
-                printf("T%d = (float) T%d;\n", res, $3.temp_id);
-                strcpy(tipo, "float");
-            }
-            else {
-                printf("float T%d;\n", res);
-                strcpy(tipo, "float");
-            }
+            printf("float T%d;\n", res);
+            strcpy(tipo, "float");
         } else {
             printf("int T%d;\n", res);
             strcpy(tipo, "int");
@@ -234,94 +174,33 @@ expr:
         strcpy($$.tipo, tipo);
         $$.nome[0] = '\0';
     }
+  | fator
+;
 
-  | expr AND expr {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        if (strcmp($1.tipo, "bool") != 0 || strcmp($3.tipo, "bool") != 0) {
-            printf("// Erro: operadores AND requerem bool, recebido %s e %s\n", $1.tipo, $3.tipo);
-        }
-        printf("T%d = T%d && T%d;\n", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-  | expr OR expr {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        if (strcmp($1.tipo, "bool") != 0 || strcmp($3.tipo, "bool") != 0) {
-            printf("// Erro: operadores OR requerem bool, recebido %s e %s\n", $1.tipo, $3.tipo);
-        }
-        printf("T%d = T%d || T%d;\n", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-  | NOT expr {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        if (strcmp($2.tipo, "bool") != 0) {
-            printf("// Erro: operador NOT requer bool, recebido %s\n", $2.tipo);
-        }
-        printf("T%d = !T%d;\n", res, $2.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-
-  | expr MENOR expr {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        printf("T%d = T%d < T%d;\n", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-  | expr MAIOR expr {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        printf("T%d = T%d > T%d;\n", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-  | expr MENORIG expr {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        printf("T%d = T%d <= T%d;\n", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-  | expr MAIORIG expr {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        printf("T%d = T%d >= T%d;\n", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-  | expr IGUAL expr {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        printf("T%d = T%d == T%d;\n", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-  | expr DIF expr {
-        int res = temp_count++;
-        printf("int T%d;\n", res);
-        printf("T%d = T%d != T%d;\n", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
-    }
-
-  | ABRE_P expr FECHA_P {
+fator:
+    ABRE_P expr FECHA_P {
         $$.temp_id = $2.temp_id;
         strcpy($$.tipo, $2.tipo);
         strcpy($$.nome, $2.nome);
+    }
+  | ABRE_P TIPO FECHA_P fator {
+        int res = temp_count++;
+        char tipo_cast[10];
+        strcpy(tipo_cast, $2);
+
+        if (
+            (strcmp($4.tipo, "int") != 0 && strcmp($4.tipo, "float") != 0) ||
+            (strcmp(tipo_cast, "int") != 0 && strcmp(tipo_cast, "float") != 0)
+        ) {
+            printf("// Erro: cast inválido de %s para %s\n", $4.tipo, tipo_cast);
+        }
+
+        printf("%s T%d;\n", tipo_cast, res);
+        printf("T%d = (%s) T%d;\n", res, tipo_cast, $4.temp_id);
+
+        $$.temp_id = res;
+        strcpy($$.tipo, tipo_cast);
+        $$.nome[0] = '\0';
     }
   | NUM {
         int res = temp_count++;
