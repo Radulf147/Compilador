@@ -61,7 +61,7 @@ char* obter_tipo(char *nome) {
         char nome[50];
     } expr_attr;
 }
-
+%token NEG
 %token <ival> NUM
 %token <fval> FNUM
 %token <str> ID
@@ -70,8 +70,15 @@ char* obter_tipo(char *nome) {
 %token ATRIB
 %token MAIS MENOS VEZES DIV
 %token ABRE_P FECHA_P
+%token IGUAL DIFERENTE MENOR MAIOR MENORIGUAL MAIORIGUAL
+%token E OU
 %token <ival> BOOLLIT
 
+%right NEG
+%left OU
+%left E
+%left IGUAL DIFERENTE
+%left MENOR MAIOR MENORIGUAL MAIORIGUAL
 %left MAIS MENOS
 %left VEZES DIV
 
@@ -127,8 +134,15 @@ expr:
         printf("T%d = T%d + T%d;\n", res, $1.temp_id, $3.temp_id);
         $$.temp_id = res;
         strcpy($$.tipo, tipo);
-        $$.nome[0] = '\0';
     }
+  | NEG expr {
+        int res = temp_count++;
+        printf("bool T%d;\n", res);
+        printf("T%d = !T%d;\n", res, $2.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+    }
+
   | expr MENOS expr {
         int res = temp_count++;
         char tipo[10];
@@ -142,7 +156,6 @@ expr:
         printf("T%d = T%d - T%d;\n", res, $1.temp_id, $3.temp_id);
         $$.temp_id = res;
         strcpy($$.tipo, tipo);
-        $$.nome[0] = '\0';
     }
   | expr VEZES expr {
         int res = temp_count++;
@@ -157,7 +170,6 @@ expr:
         printf("T%d = T%d * T%d;\n", res, $1.temp_id, $3.temp_id);
         $$.temp_id = res;
         strcpy($$.tipo, tipo);
-        $$.nome[0] = '\0';
     }
   | expr DIV expr {
         int res = temp_count++;
@@ -172,8 +184,68 @@ expr:
         printf("T%d = T%d / T%d;\n", res, $1.temp_id, $3.temp_id);
         $$.temp_id = res;
         strcpy($$.tipo, tipo);
-        $$.nome[0] = '\0';
     }
+
+  // Relacionais
+  | expr IGUAL expr {
+        int res = temp_count++;
+        printf("bool T%d;\n", res);
+        printf("T%d = T%d == T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+    }
+  | expr DIFERENTE expr {
+        int res = temp_count++;
+        printf("bool T%d;\n", res);
+        printf("T%d = T%d != T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+    }
+  | expr MENOR expr {
+        int res = temp_count++;
+        printf("bool T%d;\n", res);
+        printf("T%d = T%d < T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+    }
+  | expr MAIOR expr {
+        int res = temp_count++;
+        printf("bool T%d;\n", res);
+        printf("T%d = T%d > T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+    }
+  | expr MENORIGUAL expr {
+        int res = temp_count++;
+        printf("bool T%d;\n", res);
+        printf("T%d = T%d <= T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+    }
+  | expr MAIORIGUAL expr {
+        int res = temp_count++;
+        printf("bool T%d;\n", res);
+        printf("T%d = T%d >= T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+    }
+
+  // Lógicos
+  | expr E expr {
+        int res = temp_count++;
+        printf("bool T%d;\n", res);
+        printf("T%d = T%d && T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+    }
+  | expr OU expr {
+        int res = temp_count++;
+        printf("bool T%d;\n", res);
+        printf("T%d = T%d || T%d;\n", res, $1.temp_id, $3.temp_id);
+        $$.temp_id = res;
+        strcpy($$.tipo, "bool");
+    }
+
   | fator
 ;
 
@@ -181,26 +253,13 @@ fator:
     ABRE_P expr FECHA_P {
         $$.temp_id = $2.temp_id;
         strcpy($$.tipo, $2.tipo);
-        strcpy($$.nome, $2.nome);
     }
   | ABRE_P TIPO FECHA_P fator {
         int res = temp_count++;
-        char tipo_cast[10];
-        strcpy(tipo_cast, $2);
-
-        if (
-            (strcmp($4.tipo, "int") != 0 && strcmp($4.tipo, "float") != 0) ||
-            (strcmp(tipo_cast, "int") != 0 && strcmp(tipo_cast, "float") != 0)
-        ) {
-            printf("// Erro: cast inválido de %s para %s\n", $4.tipo, tipo_cast);
-        }
-
-        printf("%s T%d;\n", tipo_cast, res);
-        printf("T%d = (%s) T%d;\n", res, tipo_cast, $4.temp_id);
-
+        printf("%s T%d;\n", $2, res);
+        printf("T%d = (%s) T%d;\n", res, $2, $4.temp_id);
         $$.temp_id = res;
-        strcpy($$.tipo, tipo_cast);
-        $$.nome[0] = '\0';
+        strcpy($$.tipo, $2);
     }
   | NUM {
         int res = temp_count++;
@@ -208,7 +267,6 @@ fator:
         printf("T%d = %d;\n", res, $1);
         $$.temp_id = res;
         strcpy($$.tipo, "int");
-        $$.nome[0] = '\0';
     }
   | FNUM {
         int res = temp_count++;
@@ -216,7 +274,6 @@ fator:
         printf("T%d = %.2f;\n", res, $1);
         $$.temp_id = res;
         strcpy($$.tipo, "float");
-        $$.nome[0] = '\0';
     }
   | CARACTERE {
         int res = temp_count++;
@@ -224,21 +281,18 @@ fator:
         printf("T%d = %s;\n", res, $1);
         $$.temp_id = res;
         strcpy($$.tipo, "char");
-        $$.nome[0] = '\0';
     }
   | BOOLLIT {
         int res = temp_count++;
-        printf("int T%d;\n", res);
+        printf("bool T%d;\n", res);
         printf("T%d = %d;\n", res, $1);
         $$.temp_id = res;
         strcpy($$.tipo, "bool");
-        $$.nome[0] = '\0';
     }
   | ID {
         int endereco = obter_endereco($1);
         strcpy($$.tipo, obter_tipo($1));
         $$.temp_id = endereco;
-        strcpy($$.nome, $1);
     }
 ;
 

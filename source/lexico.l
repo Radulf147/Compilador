@@ -14,13 +14,24 @@
 "false"   { yylval.ival = 0; return BOOLLIT; }
 
 "="       { return ATRIB; }
+"=="      { return IGUAL; }
+"!="      { return DIFERENTE; }
+"<="      { return MENORIGUAL; }
+">="      { return MAIORIGUAL; }
+"<"       { return MENOR; }
+">"       { return MAIOR; }
+
+"&&"      { return E; }
+"||"      { return OU; }
+"!"       { return NEG; }
+
 "+"       { return MAIS; }
 "-"       { return MENOS; }
 "*"       { return VEZES; }
 "/"       { return DIV; }
 "("       { return ABRE_P; }
 ")"       { return FECHA_P; }
-";"         { return ';'; }
+";"       { return ';'; }
 
 [0-9]+"."[0-9]+   { yylval.fval = atof(yytext); return FNUM; }
 [0-9]+            { yylval.ival = atoi(yytext); return NUM; }
@@ -28,11 +39,11 @@
 
 [a-zA-Z_][a-zA-Z0-9_]*  { yylval.str = strdup(yytext); return ID; }
 
-[ \t\n]  // Ignora espaços e quebras de linha
-
-.        { printf("Caractere não reconhecido: %s\n", yytext); return 0; }
+[ \t\n]+          /* ignora espaços e quebras de linha */
+.                 { printf("Caractere não reconhecido: %s\n", yytext); return 0; }
 
 %%
+
 int yywrap(void) {
     return 1;
 }
