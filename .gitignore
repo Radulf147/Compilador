@@ -1,0 +1,25 @@
+# Arquivos gerados pelo processo de compilação (Bison e Flex)
+# Esses arquivos são recriados toda vez que você compila.
+sintatico.tab.c
+sintatico.tab.h
+lex.yy.c
+
+# Arquivos objeto intermediários do GCC
+*.o
+*.obj
+
+# Executável final gerado
+# No Windows, geralmente .exe
+compilador.exe
+# No Linux ou macOS
+compilador
+
+# Arquivos de configuração de editores (opcional, mas recomendado)
+# Exemplo para VS Code
+.vscode/
+
+# Arquivos temporários e de sistema operacional
+*.bak
+*.swp
+.DS_Store
+Thumbs.db

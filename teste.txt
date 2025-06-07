@@ -1,0 +1,41 @@
+#include<stdio.h>
+int main() {
+    int i;
+    float f;
+    char c;
+    bool b;
+    i = 10;
+    f = 20.5;
+    c = 'A';
+    b = true;
+    printf("--- Teste Abrangente Iniciado ---");
+    int resultado_aritmetico;
+    resultado_aritmetico = (i * 2) + 5;
+    float resultado_implicito;
+    resultado_implicito = resultado_aritmetico + f;
+    int resultado_explicito;
+    resultado_explicito = (int)resultado_implicito;
+
+    printf("Valores calculados. Checando condicoes...");
+    if (resultado_explicito > 40 && b == true) {
+        printf("Bloco IF: A condicao foi verdadeira.");
+        {
+            int i;
+            i = 99;
+            printf("Dentro do bloco aninhado, a variavel local 'i' vale 99.");
+        }
+        printf("Fora do bloco, a variavel 'i' original ainda vale 10.");
+
+    } else {
+        printf("Bloco ELSE: A condicao foi falsa.");
+        int entrada_extra;
+        printf("Digite o numero 1 para testar o scanf:");
+        scanf("%d", &entrada_extra);
+
+        if (entrada_extra == 1) {
+            printf("Voce digitou 1. Scanf funcional.");
+        }
+    }
+    printf("--- Teste Concluido ---");
+    return 0;
+}
