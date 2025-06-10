@@ -259,6 +259,7 @@ void yyerror(const char *s) {
 %token IGUAL DIFERENTE MENOR MAIOR MENORIGUAL MAIORIGUAL
 %token E OU
 %token KWD_WHILE 
+%token KWD_BREAK KWD_CONTINUE
 %token KWD_DO
 %token <ival> BOOLLIT
 
@@ -318,6 +319,8 @@ comando:
     | do_while_stmt        
     | printf_stmt
     | scanf_stmt
+    | break_stmt
+    | continue_stmt
     | expr ';'
     | bloco
 ;
@@ -710,6 +713,28 @@ do_while_stmt:
         adicionar_operacao_cg("if T%d goto L%d;", $6.temp_id, rotulo_inicio);
     }
 ;
+break_stmt:
+    KWD_BREAK ';' {
+        if (ponteiro_pilha_rotulos < 1) {
+            yyerror("'break' fora de laço.");
+            YYABORT;
+        }
+        int rotulo_saida = pilha_rotulos[ponteiro_pilha_rotulos - 1];
+        adicionar_operacao_cg("goto L%d;", rotulo_saida);
+    }
+;
+
+continue_stmt:
+    KWD_CONTINUE ';' {
+        if (ponteiro_pilha_rotulos < 2) {
+            yyerror("'continue' fora de laço.");
+            YYABORT;
+        }
+        int rotulo_inicio = pilha_rotulos[ponteiro_pilha_rotulos - 2];
+        adicionar_operacao_cg("goto L%d;", rotulo_inicio);
+    }
+;
+
 
 %%
 

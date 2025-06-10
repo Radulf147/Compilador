@@ -18,6 +18,8 @@
 "printf"    { return KWD_PRINTF; }
 "scanf"     { return KWD_SCANF; }
 "while"     { return KWD_WHILE; }
+"break"     { return KWD_BREAK; }
+"continue"  { return KWD_CONTINUE; }
 "do"        { return KWD_DO; }
 
 "int"       { yylval.str = strdup(yytext); return TIPO; }
