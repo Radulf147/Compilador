@@ -1,14 +1,18 @@
 int main() {
     int x;
-    x = 0;
-    do {
-        x = x + 1;
-        if (x == 2) {
-            continue;
-        }
-        if (x == 4) {
+    x = 2;
+    switch (x) {
+        case 1:
+            printf("um\n");
             break;
-        }
-    } while (x < 5);
+        case 2:
+            printf("dois\n");
+            break;
+        case 3:
+            printf("tres\n");
+            break;
+        default:
+            printf("outro\n");
+    }
     return 0;
 }

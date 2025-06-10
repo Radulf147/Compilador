@@ -17,6 +17,7 @@ void yyerror(const char *s);
 
 int rotulo_count = 1;
 int temp_count = 1;
+int temp_id_switch_expr = -1; // ADICIONE ESTA LINHA
 
 int novo_rotulo() {
     return rotulo_count++;
@@ -47,6 +48,16 @@ typedef struct Simbolo {
     int temp_id;
     struct Simbolo *next;
 } Simbolo;
+
+typedef struct {
+    int valor_case;
+    int rotulo;
+} CaseInfo;
+
+#define MAX_CASES 100
+CaseInfo lista_cases[MAX_CASES];
+int num_cases = 0;
+int rotulo_default = -1;
 
 typedef struct TabelaDeSimbolos {
     Simbolo* tabela[HASH_TABLE_SIZE];
@@ -261,6 +272,7 @@ void yyerror(const char *s) {
 %token KWD_WHILE 
 %token KWD_BREAK KWD_CONTINUE
 %token KWD_DO
+%token KWD_SWITCH KWD_CASE KWD_DEFAULT
 %token <ival> BOOLLIT
 
 %right NEG
@@ -321,6 +333,7 @@ comando:
     | scanf_stmt
     | break_stmt
     | continue_stmt
+    | switch_stmt
     | expr ';'
     | bloco
 ;
@@ -734,6 +747,75 @@ continue_stmt:
         adicionar_operacao_cg("goto L%d;", rotulo_inicio);
     }
 ;
+
+switch_stmt:
+    KWD_SWITCH ABRE_P expr FECHA_P {
+        int rotulo_fim_switch = novo_rotulo();
+        temp_id_switch_expr = $3.temp_id; // armazena o temp da expr do switch
+        num_cases = 0;
+        rotulo_default = -1;
+        push_rotulo(rotulo_fim_switch);
+    }
+    ABRE_CHAVE case_list default_case_opt {
+        // 🟢 Gerar todos os testes aqui ANTES dos rótulos dos cases
+        for (int i = 0; i < num_cases; i++) {
+            adicionar_operacao_cg("if T%d == %d goto L%d;", temp_id_switch_expr, lista_cases[i].valor_case, lista_cases[i].rotulo);
+        }
+
+        if (rotulo_default != -1) {
+            adicionar_operacao_cg("goto L%d;", rotulo_default);
+        } else {
+            int rotulo_fim_switch = pilha_rotulos[ponteiro_pilha_rotulos - 1];
+            adicionar_operacao_cg("goto L%d;", rotulo_fim_switch);
+        }
+    }
+    FECHA_CHAVE {
+        // 🟢 Rótulo do fim do switch
+        int rotulo_fim_switch = pop_rotulo();
+        adicionar_operacao_cg("L%d:", rotulo_fim_switch);
+
+        // Limpar temporários
+        temp_id_switch_expr = -1;
+        rotulo_default = -1;
+    }
+;
+
+case_list:
+    /* vazio */
+    |
+    case_list case_stmt
+;
+
+case_stmt:
+    KWD_CASE NUM ':' {
+        int rotulo_case = novo_rotulo();
+        if (num_cases < MAX_CASES) {
+            lista_cases[num_cases].valor_case = $2;
+            lista_cases[num_cases].rotulo = rotulo_case;
+            num_cases++;
+        }
+        adicionar_operacao_cg("L%d:", rotulo_case); // 🟢 rótulo do case
+        push_rotulo(rotulo_case);                   // para fechar com goto no fim
+    }
+    lista_comandos_opt {
+        int rotulo_case = pop_rotulo();
+        int rotulo_fim_switch = pilha_rotulos[ponteiro_pilha_rotulos - 1];
+        adicionar_operacao_cg("goto L%d;", rotulo_fim_switch); // 🟢 break
+    }
+;
+
+default_case_opt:
+    /* vazio */
+    |
+    KWD_DEFAULT ':' {
+        rotulo_default = novo_rotulo();
+        adicionar_operacao_cg("L%d:", rotulo_default);
+    }
+    lista_comandos_opt
+;
+
+
+
 
 
 %%

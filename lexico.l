@@ -21,6 +21,9 @@
 "break"     { return KWD_BREAK; }
 "continue"  { return KWD_CONTINUE; }
 "do"        { return KWD_DO; }
+"switch"    { return KWD_SWITCH; }
+"case"      { return KWD_CASE; }
+"default"   { return KWD_DEFAULT; }
 
 "int"       { yylval.str = strdup(yytext); return TIPO; }
 "float"     { yylval.str = strdup(yytext); return TIPO; }
@@ -60,6 +63,7 @@
 "{"         { return ABRE_CHAVE; }
 "}"         { return FECHA_CHAVE; }
 ";"         { return ';'; }
+":"         { return ':'; }
 ","         { return ','; }
 
 [0-9]+\.[0-9]+  { yylval.fval = atof(yytext); return FNUM; }
