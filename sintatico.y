@@ -258,6 +258,7 @@ void yyerror(const char *s) {
 %token ABRE_P FECHA_P
 %token IGUAL DIFERENTE MENOR MAIOR MENORIGUAL MAIORIGUAL
 %token E OU
+%token KWD_WHILE
 %token <ival> BOOLLIT
 
 %right NEG
@@ -312,11 +313,12 @@ comando:
     | atribuicao
     | retorno_main
     | if_stmt
+    | while_stmt
     | printf_stmt
     | scanf_stmt
     | expr ';'
     | bloco
-    ;
+;
 
 printf_stmt:
     KWD_PRINTF ABRE_P STRING_LITERAL FECHA_P ';' {
@@ -667,7 +669,28 @@ fator:
         $$.temp_id = s->temp_id; strcpy($$.tipo, s->tipo); strcpy($$.nome, s->nome);
         if ($1) free($1);
     }
-    ;
+;
+
+while_stmt:
+    KWD_WHILE ABRE_P expr FECHA_P {
+        if (strcmp($3.tipo, "bool") != 0) {
+            yyerror("A expressão do while deve ser booleana.");
+            YYABORT;
+        }
+        int rotulo_inicio = novo_rotulo();
+        int rotulo_saida = novo_rotulo();
+        adicionar_operacao_cg("L%d:", rotulo_inicio);
+        adicionar_operacao_cg("if_false T%d goto L%d;", $3.temp_id, rotulo_saida);
+        push_rotulo(rotulo_inicio);
+        push_rotulo(rotulo_saida);
+    }
+    bloco {
+        int rotulo_saida = pop_rotulo();
+        int rotulo_inicio = pop_rotulo();
+        adicionar_operacao_cg("goto L%d;", rotulo_inicio);
+        adicionar_operacao_cg("L%d:", rotulo_saida);
+    }
+;
 
 %%
 

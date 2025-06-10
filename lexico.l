@@ -17,6 +17,7 @@
 "else"      { return KWD_ELSE; }
 "printf"    { return KWD_PRINTF; }
 "scanf"     { return KWD_SCANF; }
+"while"     { return KWD_WHILE; }
 
 "int"       { yylval.str = strdup(yytext); return TIPO; }
 "float"     { yylval.str = strdup(yytext); return TIPO; }
