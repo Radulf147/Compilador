@@ -258,7 +258,8 @@ void yyerror(const char *s) {
 %token ABRE_P FECHA_P
 %token IGUAL DIFERENTE MENOR MAIOR MENORIGUAL MAIORIGUAL
 %token E OU
-%token KWD_WHILE
+%token KWD_WHILE 
+%token KWD_DO
 %token <ival> BOOLLIT
 
 %right NEG
@@ -314,6 +315,7 @@ comando:
     | retorno_main
     | if_stmt
     | while_stmt
+    | do_while_stmt        
     | printf_stmt
     | scanf_stmt
     | expr ';'
@@ -689,6 +691,23 @@ while_stmt:
         int rotulo_inicio = pop_rotulo();
         adicionar_operacao_cg("goto L%d;", rotulo_inicio);
         adicionar_operacao_cg("L%d:", rotulo_saida);
+    }
+;
+
+do_while_stmt:
+    KWD_DO {
+        int rotulo_inicio = novo_rotulo();
+        adicionar_operacao_cg("L%d:", rotulo_inicio);
+        push_rotulo(rotulo_inicio);
+    }
+    bloco
+    KWD_WHILE ABRE_P expr FECHA_P ';' {
+        if (strcmp($6.tipo, "bool") != 0) {
+            yyerror("A expressão do do/while deve ser booleana.");
+            YYABORT;
+        }
+        int rotulo_inicio = pop_rotulo();
+        adicionar_operacao_cg("if T%d goto L%d;", $6.temp_id, rotulo_inicio);
     }
 ;
 
