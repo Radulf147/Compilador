@@ -24,7 +24,7 @@ int num_cases = 0;
 // ESTRUTURAS DE DADOS
 typedef struct Simbolo {
     char nome[50];
-    char tipo[10];
+    char tipo[20]; // Aumentado para nomes de tipo mais longos
     int temp_id;
     int tamanho;
     struct Simbolo *next;
@@ -102,9 +102,12 @@ void inicializar_listas_cg() {
 
 void adicionar_declaracao_cg(const char* tipo, const char* nome_cg, int tamanho) {
     char buffer[150];
-    if (strcmp(tipo, "string") == 0) {
+    if (strcmp(tipo, "fixed_char_array") == 0) {
         sprintf(buffer, "char %s[%d];", nome_cg, tamanho);
-    } else {
+    } else if (strcmp(tipo, "dynamic_string") == 0) {
+        sprintf(buffer, "char* %s;", nome_cg);
+    }
+    else {
         sprintf(buffer, "%s %s;", tipo, nome_cg);
     }
     
@@ -218,7 +221,7 @@ int adicionar_simbolo(char *nome, char *tipo, int tamanho) {
             yyerror(error_msg);
             if (nome) free(nome);
             if (tipo) free(tipo);
-            return 1; // YYABORT
+            return 1;
         }
         simbolo_existente = simbolo_existente->next;
     }
@@ -260,7 +263,7 @@ void yyerror(const char *s) {
     char *str;
     struct {
         int temp_id;
-        char tipo[10];
+        char tipo[20];
         char nome[50];
         char str_val[256];
     } expr_attr;
@@ -344,7 +347,7 @@ lista_comandos:
 
 comando:
     decl
-    | string_decl
+    | string_dyn_decl
     | atribuicao
     | retorno_main
     | if_stmt
@@ -358,6 +361,17 @@ comando:
     | break_stmt
     | continue_stmt
     | for_stmt
+    ;
+
+// NOVA REGRA PARA STRING DINAMICA
+string_dyn_decl:
+    KWD_STRING ID ';' {
+        int id_temp = adicionar_simbolo($2, "dynamic_string", 0);
+        char nome_var_formatado[60];
+        sprintf(nome_var_formatado, "%s_T%d", $2, id_temp);
+        adicionar_declaracao_cg("dynamic_string", nome_var_formatado, 0);
+        if ($2) free($2);
+    }
     ;
 
 printf_stmt:
@@ -377,12 +391,18 @@ scanf_stmt:
             sprintf(error_msg, "Variavel '%s' nao declarada usada no scanf.", $6);
             yyerror(error_msg);
             if ($6) free($6);
-            return 1; // YYABORT
+            return 1;
+        }
+        // SCANF para string dinamica nao eh seguro/implementado.
+        if (strcmp(s->tipo, "dynamic_string") == 0) {
+            yyerror("Nao e possivel usar scanf diretamente em uma string dinamica (ponteiro).");
+            return 1;
         }
         char format_str_cg[256];
         sprintf(format_str_cg, "\"%s\"", $3);
         char var_addr_cg[70];
-        if (strcmp(s->tipo, "string") == 0) {
+        // Para fixed_char_array (antiga string), passa o nome direto.
+        if (strcmp(s->tipo, "fixed_char_array") == 0) {
             sprintf(var_addr_cg, "%s_T%d", s->nome, s->temp_id);
         } else {
             sprintf(var_addr_cg, "&%s_T%d", s->nome, s->temp_id);
@@ -399,7 +419,7 @@ if_stmt:
     KWD_IF ABRE_P expr FECHA_P {
         if (strcmp($3.tipo, "bool") != 0) {
             yyerror("A expressao em um 'if' deve ser do tipo booleano.");
-            return 1; // YYABORT
+            return 1;
         }
         int rotulo_saida = novo_rotulo();
         adicionar_operacao_cg("if_false T%d goto L%d;", $3.temp_id, rotulo_saida);
@@ -430,7 +450,7 @@ while_stmt:
     KWD_WHILE ABRE_P expr FECHA_P {
         if (strcmp($3.tipo, "bool") != 0) {
             yyerror("A expressao do while deve ser booleana.");
-            return 1; // YYABORT
+            return 1;
         }
         int rotulo_inicio = novo_rotulo();
         int rotulo_saida = novo_rotulo();
@@ -456,7 +476,7 @@ do_while_stmt:
     bloco KWD_WHILE ABRE_P expr FECHA_P ';' {
         if (strcmp($6.tipo, "bool") != 0) {
             yyerror("A expressao do do/while deve ser booleana.");
-            return 1; // YYABORT
+            return 1;
         }
         int rotulo_inicio = pop_rotulo();
         adicionar_operacao_cg("if_true T%d goto L%d;", $6.temp_id, rotulo_inicio);
@@ -467,7 +487,7 @@ switch_stmt:
     KWD_SWITCH ABRE_P expr FECHA_P {
         if (strcmp($3.tipo, "int") != 0) {
             yyerror("A expressao do switch deve ser do tipo 'int'.");
-            return 1; // YYABORT
+            return 1;
         }
         int rotulo_fim_switch = novo_rotulo();
         temp_id_switch_expr = $3.temp_id;
@@ -513,7 +533,7 @@ case_stmt:
             num_cases++;
         } else {
             yyerror("Numero maximo de 'case' excedido.");
-            return 1; // YYABORT
+            return 1;
         }
         adicionar_operacao_cg("L%d: // Case %d", rotulo_case, $2);
     }
@@ -532,7 +552,7 @@ break_stmt:
     KWD_BREAK ';' {
         if (ponteiro_pilha_rotulos < 1) {
             yyerror("'break' fora de um laco ou switch.");
-            return 1; // YYABORT
+            return 1;
         }
         int rotulo_saida = pilha_rotulos[ponteiro_pilha_rotulos - 1];
         adicionar_operacao_cg("goto L%d; // break", rotulo_saida);
@@ -543,7 +563,7 @@ continue_stmt:
     KWD_CONTINUE ';' {
         if (ponteiro_pilha_rotulos < 2) {
             yyerror("'continue' fora de um laco (while, do-while).");
-            return 1; // YYABORT
+            return 1;
         }
         int rotulo_inicio = pilha_rotulos[ponteiro_pilha_rotulos - 2];
         adicionar_operacao_cg("goto L%d; // continue", rotulo_inicio);
@@ -554,23 +574,31 @@ retorno_main:
     KWD_RETURN NUM ';' { adicionar_operacao_cg("return %d;", $2); }
     ;
 
+// REGRA 'decl' ATUALIZADA PARA LIDAR COM 'char' COMO ARRAY
 decl:
     TIPO ID ';' {
+        // Regra para int, float, bool e char simples (se desejado no futuro)
+        if (strcmp($1, "char") == 0) {
+            yyerror("Declaracao de 'char' deve ter um tamanho fixo, ex: char nome[10];");
+            return 1;
+        }
         int id_temp = adicionar_simbolo($2, $1, 0);
         char nome_var_formatado[60];
         sprintf(nome_var_formatado, "%s_T%d", $2, id_temp);
         adicionar_declaracao_cg($1, nome_var_formatado, 0);
         if ($1) free($1); if ($2) free($2);
     }
-    ;
-
-string_decl:
-    KWD_STRING ID ABRE_COL NUM FECHA_COL ';' {
-        int id_temp = adicionar_simbolo($2, "string", $4);
+    | TIPO ID ABRE_COL NUM FECHA_COL ';' {
+        // Regra para char como array de tamanho fixo
+        if (strcmp($1, "char") != 0) {
+            yyerror("Apenas o tipo 'char' pode ser declarado como um array.");
+            return 1;
+        }
+        int id_temp = adicionar_simbolo($2, "fixed_char_array", $4);
         char nome_var_formatado[80];
         sprintf(nome_var_formatado, "%s_T%d", $2, id_temp);
-        adicionar_declaracao_cg("string", nome_var_formatado, $4);
-        if ($2) free($2);
+        adicionar_declaracao_cg("fixed_char_array", nome_var_formatado, $4);
+        if ($1) free($1); if ($2) free($2);
     }
     ;
 
@@ -578,28 +606,41 @@ atribuicao:
     ID ATRIB expr ';' {
         Simbolo* s = obter_simbolo($1);
         if (!s) {
-            yyerror("Variavel nao declarada."); return 1; // YYABORT
+            yyerror("Variavel nao declarada."); return 1;
         }
         
-        if (strcmp(s->tipo, "string") == 0) {
+        // Logica para o novo 'char' (string de tamanho fixo)
+        if (strcmp(s->tipo, "fixed_char_array") == 0) {
             if (strcmp($3.tipo, "string_literal") != 0) {
-                yyerror("Atribuicao para string so pode ser feita com um literal de string \"...\".");
-                return 1; // YYABORT
+                yyerror("Atribuicao para um array de char so pode ser com um literal de string.");
+                return 1;
             }
             if (strlen($3.str_val) >= s->tamanho) {
-                char error_msg[450];
-                snprintf(error_msg, sizeof(error_msg), "Erro: O texto \"%s\" (%zu chars) e grande demais para a variavel '%s'[%d].", $3.str_val, strlen($3.str_val), s->nome, s->tamanho);
+                char error_msg[200];
+                snprintf(error_msg, sizeof(error_msg), "Erro: O texto e grande demais para a variavel '%s'[%d].", s->nome, s->tamanho);
                 yyerror(error_msg);
-                return 1; // YYABORT
+                return 1;
             }
             char var_name_cg[70];
             sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
             adicionar_operacao_cg("strcpy(%s, \"%s\");", var_name_cg, $3.str_val);
+
+        // Logica para o novo 'string' (ponteiro dinamico)
+        } else if (strcmp(s->tipo, "dynamic_string") == 0) {
+            if (strcmp($3.tipo, "string_literal") != 0) {
+                yyerror("Atribuicao para string dinamica so pode ser com um literal de string.");
+                return 1;
+            }
+            char var_name_cg[70];
+            sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
+            adicionar_operacao_cg("%s = \"%s\";", var_name_cg, $3.str_val);
+        
+        // Logica para outros tipos (int, float, bool)
         } else {
             char var_name_cg[60];
             sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
             int expr_temp_id = $3.temp_id;
-            char expr_tipo[10];
+            char expr_tipo[20];
             strcpy(expr_tipo, $3.tipo);
 
             if (strcmp(s->tipo, "float") == 0 && strcmp(expr_tipo, "int") == 0) {
@@ -618,9 +659,9 @@ atribuicao:
 expr:
     expr MAIS expr {
         int res = temp_count++;
-        char tipo_res[10];
-        int id1 = $1.temp_id; char tipo1[10]; strcpy(tipo1, $1.tipo);
-        int id3 = $3.temp_id; char tipo3[10]; strcpy(tipo3, $3.tipo);
+        char tipo_res[20];
+        int id1 = $1.temp_id; char tipo1[20]; strcpy(tipo1, $1.tipo);
+        int id3 = $3.temp_id; char tipo3[20]; strcpy(tipo3, $3.tipo);
         char nome_temp_res[10];
         sprintf(nome_temp_res, "T%d", res);
 
@@ -646,9 +687,9 @@ expr:
     }
     | expr MENOS expr {
         int res = temp_count++;
-        char tipo_res[10];
-        int id1 = $1.temp_id; char tipo1[10]; strcpy(tipo1, $1.tipo);
-        int id3 = $3.temp_id; char tipo3[10]; strcpy(tipo3, $3.tipo);
+        char tipo_res[20];
+        int id1 = $1.temp_id; char tipo1[20]; strcpy(tipo1, $1.tipo);
+        int id3 = $3.temp_id; char tipo3[20]; strcpy(tipo3, $3.tipo);
         char nome_temp_res[10];
         sprintf(nome_temp_res, "T%d", res);
         if (strcmp(tipo1, "float") == 0 && strcmp(tipo3, "int") == 0) {
@@ -679,9 +720,9 @@ expr:
         strcpy($$.tipo, tipo_res);
     }
     | expr VEZES expr {
-        int res = temp_count++; char tipo_res[10];
-        int id1 = $1.temp_id; char tipo1[10]; strcpy(tipo1, $1.tipo);
-        int id3 = $3.temp_id; char tipo3[10]; strcpy(tipo3, $3.tipo);
+        int res = temp_count++; char tipo_res[20];
+        int id1 = $1.temp_id; char tipo1[20]; strcpy(tipo1, $1.tipo);
+        int id3 = $3.temp_id; char tipo3[20]; strcpy(tipo3, $3.tipo);
         char nome_temp_res[10];
         sprintf(nome_temp_res, "T%d", res);
         if (strcmp(tipo1, "float") == 0 && strcmp(tipo3, "int") == 0) {
@@ -710,10 +751,10 @@ expr:
         $$.temp_id = res; strcpy($$.tipo, tipo_res);
     }
     | expr DIV expr {
-        int res = temp_count++; char tipo_res[10];
-        int id1 = $1.temp_id; char tipo1[10];
+        int res = temp_count++; char tipo_res[20];
+        int id1 = $1.temp_id; char tipo1[20];
         strcpy(tipo1, $1.tipo);
-        int id3 = $3.temp_id; char tipo3[10];
+        int id3 = $3.temp_id; char tipo3[20];
         strcpy(tipo3, $3.tipo);
         char nome_temp_res[10];
         sprintf(nome_temp_res, "T%d", res);
@@ -746,29 +787,32 @@ expr:
     | expr IGUAL expr {
         int res = temp_count++;
         char nome_temp_res[10]; sprintf(nome_temp_res, "T%d", res);
-        if (strcmp($1.tipo, "string") == 0 || strcmp($1.tipo, "string_literal") == 0 ||
-            strcmp($3.tipo, "string") == 0 || strcmp($3.tipo, "string_literal") == 0) {
-            
-            char op1_str[300], op2_str[300];
-            Simbolo* s1 = obter_simbolo($1.nome);
-            Simbolo* s2 = obter_simbolo($3.nome);
+        
+        char tipo1[20]; strcpy(tipo1, $1.tipo);
+        char tipo3[20]; strcpy(tipo3, $3.tipo);
 
+        // Se qualquer um dos operandos for um tipo de string, usa strcmp
+        if (strstr(tipo1, "string") || strstr(tipo1, "char_array") || strstr(tipo3, "string") || strstr(tipo3, "char_array")) {
+            char op1_str[300], op2_str[300];
+            
+            // Formata o operando 1
             if (strcmp($1.tipo, "string_literal") == 0) {
                 snprintf(op1_str, sizeof(op1_str), "\"%s\"", $1.str_val);
-            } else if (s1 && strcmp(s1->tipo, "string") == 0) {
-                snprintf(op1_str, sizeof(op1_str), "%s_T%d", s1->nome, s1->temp_id);
+            } else {
+                snprintf(op1_str, sizeof(op1_str), "%s_T%d", $1.nome, $1.temp_id);
             }
 
+            // Formata o operando 2
             if (strcmp($3.tipo, "string_literal") == 0) {
                 snprintf(op2_str, sizeof(op2_str), "\"%s\"", $3.str_val);
-            } else if (s2 && strcmp(s2->tipo, "string") == 0) {
-                snprintf(op2_str, sizeof(op2_str), "%s_T%d", s2->nome, s2->temp_id);
+            } else {
+                snprintf(op2_str, sizeof(op2_str), "%s_T%d", $3.nome, $3.temp_id);
             }
 
             adicionar_declaracao_cg("bool", nome_temp_res, 0);
             adicionar_operacao_cg("T%d = (strcmp(%s, %s) == 0);", res, op1_str, op2_str);
         
-        } else {
+        } else { // Caso contrario, usa comparacao numerica
             adicionar_declaracao_cg("bool", nome_temp_res, 0);
             adicionar_operacao_cg("T%d = T%d == T%d;", res, $1.temp_id, $3.temp_id);
         }
@@ -893,7 +937,7 @@ fator:
     | ID {
         Simbolo* s = obter_simbolo($1);
         if (!s) {
-            yyerror("Variavel nao declarada."); return 1; // YYABORT
+            yyerror("Variavel nao declarada."); return 1;
         }
         $$.temp_id = s->temp_id; 
         strcpy($$.tipo, s->tipo); 
@@ -928,7 +972,7 @@ for_stmt:
         int rotulo_saida = pilha_rotulos[ponteiro_pilha_rotulos - 1];
         if ($5.temp_id != -1) { 
             if (strcmp($5.tipo, "bool") != 0) { yyerror("Condicao do 'for' deve ser booleana.");
-            return 1; // YYABORT
+            return 1;
             }
             adicionar_operacao_cg("if_false T%d goto L%d;", $5.temp_id, rotulo_saida);
         }
@@ -939,7 +983,7 @@ for_stmt:
                 char error_msg[100];
                 sprintf(error_msg, "Variavel de incremento '%s' nao declarada.", $7.nome_id);
                 yyerror(error_msg);
-                return 1; // YYABORT
+                return 1;
             }
             char var_name_cg[70];
             sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
@@ -962,7 +1006,7 @@ for_stmt:
         int rotulo_saida = pilha_rotulos[ponteiro_pilha_rotulos - 1];
         if ($5.temp_id != -1) {
             if (strcmp($5.tipo, "bool") != 0) { yyerror("Condicao do 'for' deve ser booleana.");
-            return 1; // YYABORT
+            return 1;
             }
             adicionar_operacao_cg("if_false T%d goto L%d;", $5.temp_id, rotulo_saida);
         }
@@ -973,7 +1017,7 @@ for_stmt:
                 char error_msg[100];
                 sprintf(error_msg, "Variavel de incremento '%s' nao declarada.", $7.nome_id);
                 yyerror(error_msg);
-                return 1; // YYABORT
+                return 1;
             }
             char var_name_cg[70];
             sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
