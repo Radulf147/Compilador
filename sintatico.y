@@ -267,6 +267,10 @@ void yyerror(const char *s) {
         char nome[50];
         char str_val[256];
     } expr_attr;
+    struct {                  // NOVA ESTRUTURA
+        char nome_id[50];     // Nome da variável a ser incrementada
+        int temp_id_expr;     // ID do temporário com o valor do incremento
+    } atribuicao_guardada_attr
 }
 
 // SEÇÃO DE TOKENS
@@ -289,6 +293,7 @@ void yyerror(const char *s) {
 %token IGUAL DIFERENTE MENOR MAIOR MENORIGUAL MAIORIGUAL
 %token E OU
 %token <ival> BOOLLIT
+%token KWD_FOR
 
 // NOVOS TOKENS ADICIONADOS
 %token KWD_SWITCH KWD_CASE KWD_DEFAULT
@@ -300,7 +305,8 @@ void yyerror(const char *s) {
 %left MAIS MENOS
 %left VEZES DIV
 
-%type <expr_attr> expr fator
+%type <expr_attr> expr fator opt_expr
+%type <atribuicao_guardada_attr> for_incremento
 
 %%
 
@@ -359,6 +365,7 @@ comando:
     | switch_stmt   // NOVO
     | break_stmt    // NOVO
     | continue_stmt // NOVO
+    | for_stmt
     ;
 
 printf_stmt:
@@ -893,6 +900,91 @@ fator:
         if ($1) free($1);
     }
     ;
+
+opt_expr:
+    /* vazio */ { $$.temp_id = -1; }
+    | expr
+    ;
+
+for_incremento:
+    /* vazio */ { $$.temp_id_expr = -1; }
+    | ID ATRIB expr {
+        strcpy($$.nome_id, $1);
+        $$.temp_id_expr = $3.temp_id;
+        if ($1) free($1);
+    }
+    ;
+
+
+for_stmt:
+    KWD_FOR ABRE_P atribuicao {
+        int rotulo_condicao = novo_rotulo();
+        int rotulo_saida = novo_rotulo();
+        adicionar_operacao_cg("L%d:", rotulo_condicao);
+        push_rotulo(rotulo_condicao);
+        push_rotulo(rotulo_saida);
+    }
+    opt_expr ';' for_incremento FECHA_P bloco {
+        int rotulo_saida = pilha_rotulos[ponteiro_pilha_rotulos - 1];
+        if ($5.temp_id != -1) { 
+            if (strcmp($5.tipo, "bool") != 0) { yyerror("Condição do 'for' deve ser booleana."); YYABORT; }
+            adicionar_operacao_cg("if_false T%d goto L%d;", $5.temp_id, rotulo_saida);
+        }
+
+        if ($7.temp_id_expr != -1) {
+            Simbolo* s = obter_simbolo($7.nome_id);
+            if(!s) {
+                char error_msg[100];
+                // Corrigido de $4 para $7
+                sprintf(error_msg, "Variável de incremento '%s' não declarada.", $7.nome_id);
+                yyerror(error_msg);
+                YYABORT;
+            }
+            char var_name_cg[70];
+            sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
+            adicionar_operacao_cg("%s = T%d; // Incremento do for", var_name_cg, $7.temp_id_expr);
+        }
+
+        int rotulo_saida_final = pop_rotulo();
+        int rotulo_condicao_final = pop_rotulo();
+        adicionar_operacao_cg("goto L%d;", rotulo_condicao_final);
+        adicionar_operacao_cg("L%d: // Fim do FOR", rotulo_saida_final);
+    }
+
+    | KWD_FOR ABRE_P ';' {
+        int rotulo_condicao = novo_rotulo();
+        int rotulo_saida = novo_rotulo();
+        adicionar_operacao_cg("L%d:", rotulo_condicao);
+        push_rotulo(rotulo_condicao);
+        push_rotulo(rotulo_saida);
+    }
+    opt_expr ';' for_incremento FECHA_P bloco {
+        int rotulo_saida = pilha_rotulos[ponteiro_pilha_rotulos - 1];
+        if ($5.temp_id != -1) {
+            if (strcmp($5.tipo, "bool") != 0) { yyerror("Condição do 'for' deve ser booleana."); YYABORT; }
+            adicionar_operacao_cg("if_false T%d goto L%d;", $5.temp_id, rotulo_saida);
+        }
+
+        if ($7.temp_id_expr != -1) {
+            Simbolo* s = obter_simbolo($7.nome_id);
+            if(!s) {
+                char error_msg[100];
+                sprintf(error_msg, "Variável de incremento '%s' não declarada.", $7.nome_id);
+                yyerror(error_msg);
+                YYABORT;
+            }
+            char var_name_cg[70];
+            sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
+            adicionar_operacao_cg("%s = T%d; // Incremento do for", var_name_cg, $7.temp_id_expr);
+        }
+
+        int rotulo_saida_final = pop_rotulo();
+        int rotulo_condicao_final = pop_rotulo();
+        adicionar_operacao_cg("goto L%d;", rotulo_condicao_final);
+        adicionar_operacao_cg("L%d: // Fim do FOR", rotulo_saida_final);
+    }
+    ;
+    
 
 %%
 

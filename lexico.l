@@ -24,6 +24,7 @@
 "case"      { return KWD_CASE; }    
 "default"   { return KWD_DEFAULT; }  
 "continue"  { return KWD_CONTINUE; } 
+"for"       { return KWD_FOR; }
 
 "int"       { yylval.str = strdup(yytext); return TIPO; }
 "float"     { yylval.str = strdup(yytext); return TIPO; }
