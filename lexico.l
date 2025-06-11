@@ -18,12 +18,12 @@
 "printf"    { return KWD_PRINTF; }
 "scanf"     { return KWD_SCANF; }
 "while"     { return KWD_WHILE; }
-"break"     { return KWD_BREAK; }
-"continue"  { return KWD_CONTINUE; }
 "do"        { return KWD_DO; }
-"switch"    { return KWD_SWITCH; }
-"case"      { return KWD_CASE; }
-"default"   { return KWD_DEFAULT; }
+"string"    { return KWD_STRING; }
+"switch"    { return KWD_SWITCH; }   
+"case"      { return KWD_CASE; }    
+"default"   { return KWD_DEFAULT; }  
+"continue"  { return KWD_CONTINUE; } 
 
 "int"       { yylval.str = strdup(yytext); return TIPO; }
 "float"     { yylval.str = strdup(yytext); return TIPO; }
@@ -48,11 +48,9 @@
 ">="        { return MAIORIGUAL; }
 "<"         { return MENOR; }
 ">"         { return MAIOR; }
-
 "&&"        { return E; }
 "||"        { return OU; }
 "!"         { return NEG; }
-
 "+"         { return MAIS; }
 "-"         { return MENOS; }
 "*"         { return VEZES; }
@@ -62,18 +60,22 @@
 ")"         { return FECHA_P; }
 "{"         { return ABRE_CHAVE; }
 "}"         { return FECHA_CHAVE; }
+"["         { return ABRE_COL; }    
+"]"         { return FECHA_COL; }   
 ";"         { return ';'; }
-":"         { return ':'; }
+":"         { return ':'; }        
 ","         { return ','; }
 
 [0-9]+\.[0-9]+  { yylval.fval = atof(yytext); return FNUM; }
 [0-9]+          { yylval.ival = atoi(yytext); return NUM; }
 \'[^\']\'       { yylval.str = strdup(yytext); return CARACTERE; }
 
+
 [a-zA-Z_][a-zA-Z0-9_]* {
     yylval.str = strdup(yytext);
     return ID;
 }
+
 
 [ \t\n]+
 
