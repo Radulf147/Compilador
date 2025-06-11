@@ -20,10 +20,11 @@
 "while"     { return KWD_WHILE; }
 "do"        { return KWD_DO; }
 "string"    { return KWD_STRING; }
-"switch"    { return KWD_SWITCH; }   
-"case"      { return KWD_CASE; }    
-"default"   { return KWD_DEFAULT; }  
-"continue"  { return KWD_CONTINUE; } 
+"switch"    { return KWD_SWITCH; }
+"case"      { return KWD_CASE; }
+"default"   { return KWD_DEFAULT; }
+"break"     { return KWD_BREAK; }
+"continue"  { return KWD_CONTINUE; }
 "for"       { return KWD_FOR; }
 
 "int"       { yylval.str = strdup(yytext); return TIPO; }
@@ -61,10 +62,10 @@
 ")"         { return FECHA_P; }
 "{"         { return ABRE_CHAVE; }
 "}"         { return FECHA_CHAVE; }
-"["         { return ABRE_COL; }    
-"]"         { return FECHA_COL; }   
+"["         { return ABRE_COL; }
+"]"         { return FECHA_COL; }
 ";"         { return ';'; }
-":"         { return ':'; }        
+":"         { return ':'; }
 ","         { return ','; }
 
 [0-9]+\.[0-9]+  { yylval.fval = atof(yytext); return FNUM; }
@@ -77,8 +78,8 @@
     return ID;
 }
 
-
-[ \t\n]+
+[ \t\n]+                  { /* Ignora espacos em branco e novas linhas */ }
+"//"[^\n]* { /* IGNORA COMENTARIOS DE LINHA - LINHA ADICIONADA */ }
 
 . { fprintf(stderr, "LEXER WARN: Caractere não reconhecido no lexico: '%s' (ASCII: %d)\n", yytext, (int)yytext[0]); }
 
