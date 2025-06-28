@@ -102,15 +102,24 @@ void inicializar_listas_cg() {
 
 void adicionar_declaracao_cg(const char* tipo, const char* nome_cg, int tamanho) {
     char buffer[150];
+    const char* tipo_cg = tipo; // Usamos uma variável auxiliar
+
+    // ADICIONE ESTA VERIFICAÇÃO:
+    // Se o tipo interno for "bool", o tipo no código C gerado será "int".
+    if (strcmp(tipo, "bool") == 0) {
+        tipo_cg = "int";
+    }
+
+    // O resto da sua função continua igual, mas usando 'tipo_cg'
     if (strcmp(tipo, "fixed_char_array") == 0) {
         sprintf(buffer, "char %s[%d];", nome_cg, tamanho);
     } else if (strcmp(tipo, "dynamic_string") == 0) {
         sprintf(buffer, "char* %s;", nome_cg);
-    }
-    else {
-        sprintf(buffer, "%s %s;", tipo, nome_cg);
+    } else {
+        sprintf(buffer, "%s %s;", tipo_cg, nome_cg); // Usa o tipo potencialmente modificado
     }
     
+    // O restante da sua função para alocar e adicionar o nó continua o mesmo...
     CodegenDecl *novo = (CodegenDecl*)malloc(sizeof(CodegenDecl));
     if (!novo) { yyerror("Falha ao alocar memoria para declaracao CG"); exit(EXIT_FAILURE); }
     strncpy(novo->definicao, buffer, sizeof(novo->definicao) - 1);
@@ -922,11 +931,20 @@ fator:
         if ($1) free($1);
     }
     | BOOLLIT {
-        int res = temp_count++; char nome_temp_res[10];
+        int res = temp_count++; 
+        char nome_temp_res[10];
         sprintf(nome_temp_res, "T%d", res);
-        adicionar_declaracao_cg("bool", nome_temp_res, 0);
-        adicionar_operacao_cg("T%d = %s;", res, ($1 ? "true" : "false"));
-        $$.temp_id = res; strcpy($$.tipo, "bool");
+        
+        // A Correção 1 já fará esta linha gerar "int T..."
+        adicionar_declaracao_cg("bool", nome_temp_res, 0); 
+        
+        // MUDE ESTA LINHA:
+        // Antes: adicionar_operacao_cg("T%d = %s;", res, ($1 ? "true" : "false"));
+        // Agora:
+        adicionar_operacao_cg("T%d = %d;", res, $1); // $1 já é 1 ou 0 vindo do léxico
+
+        $$.temp_id = res; 
+        strcpy($$.tipo, "bool"); // Mantenha "bool" como tipo *interno* para a checagem de tipos
     }
     | STRING_LITERAL {
         strcpy($$.tipo, "string_literal");
@@ -937,11 +955,31 @@ fator:
     | ID {
         Simbolo* s = obter_simbolo($1);
         if (!s) {
-            yyerror("Variavel nao declarada."); return 1;
+            char error_msg[100];
+            sprintf(error_msg, "Variavel '%s' nao declarada.", $1);
+            yyerror(error_msg);
+            if ($1) free($1);
+            return 1;
         }
-        $$.temp_id = s->temp_id; 
-        strcpy($$.tipo, s->tipo); 
-        strcpy($$.nome, s->nome);
+
+        // 1. Cria um NOVO temporário para carregar o valor da variável.
+        int novo_temp_id = temp_count++;
+        char nome_novo_temp[20];
+        sprintf(nome_novo_temp, "T%d", novo_temp_id);
+
+        // 2. Declara este novo temporário.
+        adicionar_declaracao_cg(s->tipo, nome_novo_temp, 0);
+
+        // 3. Gera a instrução para carregar o valor da variável no novo temporário.
+        char nome_var_cg[70];
+        sprintf(nome_var_cg, "%s_T%d", s->nome, s->temp_id);
+        adicionar_operacao_cg("%s = %s;", nome_novo_temp, nome_var_cg);
+
+        // 4. Passa o ID do NOVO temporário (que agora contém o valor) para cima.
+        $$.temp_id = novo_temp_id;
+        strcpy($$.tipo, s->tipo);
+        strcpy($$.nome, s->nome); // Mantém o nome original para referência, se necessário
+        
         if ($1) free($1);
     }
     ;
