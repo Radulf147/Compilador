@@ -1,86 +1,72 @@
 %{
-#include "sintatico.tab.h"
-#include <string.h>
-#include <stdlib.h>
+#include <string>
+#include "y.tab.h"
 %}
 
-%option noyywrap
+ESPACO      [ \t]
+DIGITO      [0-9]
+LETRA       [a-zA-Z_]
+DELIM       {ESPACO}+
+NUM         {DIGITO}+
+REAL        {NUM}+("."{NUM}+)?
+CHAR        \'({LETRA}|{NUM})\'
+CADEIA_CHAR \"[^\"]*\"
+ID          {LETRA}({LETRA}|{NUM})*
+BOOL        ("true"|"false")
+RELACIONAIS (">"|"<"|"<="|">="|"=="|"!=")
+OU          ("||")
+E           ("&&")
+NEG         ("!")
+CAST        ("(float)"|"(int)"|"(bool)"|"(char)")
 
 %%
 
-^"#include"[ \t]*<[^>]+> { yylval.str = strdup(yytext); return INCLUDE_DIRECTIVE; }
-^"#include"[ \t]*\"[^\"]+\" { yylval.str = strdup(yytext); return INCLUDE_DIRECTIVE; }
+"\n"            {}
+{DELIM}         {}
+"//".* { /* Comentário de linha, não faz nada */ }
+"if"            {return KWD_IF;}
+"then"          {return KWD_THEN;}
+"else"          {return KWD_ELSE;}
+"while"         {return KWD_WHILE;}
+"do"            {return KWD_DO;}
+"for"           {return KWD_FOR;}
+"break"         {return KWD_BREAK;}
+"continue"      {return KWD_CONTINUE;}
+"switch"        {return KWD_SWITCH;}
+"case"          {return KWD_CASE;}
+"default"       {return KWD_DEFAULT;}
+"input"         {return KWD_INPUT;}
+"output"        {return KWD_OUTPUT;}
+"def"           {return KWD_DEF;}
+"main"          {return KWD_MAIN;}
+"var"           {return KWD_VAR;}
+"+="            {return KWD_PLUS_EQ;}
+"-="            {return KWD_MINUS_EQ;}
+"*="            {return KWD_MULT_EQ;}
+"/="            {return KWD_DIV_EQ;}
+"++"            {return KWD_INC;}
+"--"            {return KWD_DEC;}
+[(){}\[\]:;,]   { return *yytext; }
+[+\-*/]         { return *yytext; }
+"="             { return '='; }
+"strcpy"        {yylval.label = yytext; return KWD_CPY;}
+"strcat"        {yylval.label = yytext; return KWD_CAT;}
 
-"main"      { return KWD_MAIN; }
-"return"    { return KWD_RETURN; }
-"if"        { return KWD_IF; }
-"else"      { return KWD_ELSE; }
-"printf"    { return KWD_PRINTF; }
-"scanf"     { return KWD_SCANF; }
-"while"     { return KWD_WHILE; }
-"do"        { return KWD_DO; }
-"string"    { return KWD_STRING; }
-"switch"    { return KWD_SWITCH; }
-"case"      { return KWD_CASE; }
-"default"   { return KWD_DEFAULT; }
-"break"     { return KWD_BREAK; }
-"continue"  { return KWD_CONTINUE; }
-"for"       { return KWD_FOR; }
+"%d"            { yylval.label = yytext; yylval.tipo = "int";    return KWD_TIPO_INPUT; }
+"%f"            { yylval.label = yytext; yylval.tipo = "float";  return KWD_TIPO_INPUT; }
+"%s"            { yylval.label = yytext; yylval.tipo = "string"; return KWD_TIPO_INPUT; }
+"%c"            { yylval.label = yytext; yylval.tipo = "char";   return KWD_TIPO_INPUT; }
 
-"int"       { yylval.str = strdup(yytext); return TIPO; }
-"float"     { yylval.str = strdup(yytext); return TIPO; }
-"char"      { yylval.str = strdup(yytext); return TIPO; }
-"bool"      { yylval.str = strdup(yytext); return TIPO; }
-
-"true"      { yylval.ival = 1; return BOOLLIT; }
-"false"     { yylval.ival = 0; return BOOLLIT; }
-
-\"(\\.|[^"\\])*\" {
-    yylval.str = (char*) malloc(yyleng - 1);
-    strncpy(yylval.str, yytext + 1, yyleng - 2);
-    yylval.str[yyleng - 2] = '\0';
-    return STRING_LITERAL;
-}
-
-"&"         { return AMPERSAND; }
-"="         { return ATRIB; }
-"=="        { return IGUAL; }
-"!="        { return DIFERENTE; }
-"<="        { return MENORIGUAL; }
-">="        { return MAIORIGUAL; }
-"<"         { return MENOR; }
-">"         { return MAIOR; }
-"&&"        { return E; }
-"||"        { return OU; }
-"!"         { return NEG; }
-"+"         { return MAIS; }
-"-"         { return MENOS; }
-"*"         { return VEZES; }
-"/"         { return DIV; }
-
-"("         { return ABRE_P; }
-")"         { return FECHA_P; }
-"{"         { return ABRE_CHAVE; }
-"}"         { return FECHA_CHAVE; }
-"["         { return ABRE_COL; }
-"]"         { return FECHA_COL; }
-";"         { return ';'; }
-":"         { return ':'; }
-","         { return ','; }
-
-[0-9]+\.[0-9]+  { yylval.fval = atof(yytext); return FNUM; }
-[0-9]+          { yylval.ival = atoi(yytext); return NUM; }
-\'[^\']\'       { yylval.str = strdup(yytext); return CARACTERE; }
-
-
-[a-zA-Z_][a-zA-Z0-9_]* {
-    yylval.str = strdup(yytext);
-    return ID;
-}
-
-[ \t\n]+                  { /* Ignora espacos em branco e novas linhas */ }
-"//"[^\n]* { /* IGNORA COMENTARIOS DE LINHA - LINHA ADICIONADA */ }
-
-. { fprintf(stderr, "LEXER WARN: Caractere não reconhecido no lexico: '%s' (ASCII: %d)\n", yytext, (int)yytext[0]); }
-
+{CAST}          { yylval.label = yytext; if(string(yylval.label)=="(float)") yylval.tipo="float"; else if(string(yylval.label)=="(int)") yylval.tipo="int"; else if(string(yylval.label)=="(char)") yylval.tipo="char"; else yylval.tipo="int"; return KWD_CAST;}
+{BOOL}          { yylval.label = yytext; return KWD_BOOL;}
+{NUM}           { yylval.label = yytext; return KWD_NUM;}
+{ID}            { yylval.label = yytext; return KWD_ID;}
+{REAL}          { yylval.label = yytext; return KWD_FLOAT;}
+{OU}            { yylval.label = yytext; return KWD_OU;}
+{E}             { yylval.label = yytext; return KWD_E;}
+{NEG}           { yylval.label = yytext; return KWD_NEG;}
+{RELACIONAIS}   { yylval.label = yytext; return KWD_RELACIONAL;}
+{CHAR}          { yylval.label = yytext; return KWD_CHAR;}
+{CADEIA_CHAR}   { yylval.label = unescape_string(yytext); return KWD_CADEIA_CHAR;}
+.               { /* Ignora outros */ }
 %%

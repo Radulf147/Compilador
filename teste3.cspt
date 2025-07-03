@@ -1,0 +1,38 @@
+def main {
+	var i;
+	var j;
+	var k;
+
+	output("--- Teste de Laco FOR ---\n");
+	for (i = 0; i < 10; i = i + 1) {
+		if (i == 1) then {
+			output("i= 1, continue\n");
+			continue;
+		}
+		if (i == 4) then {
+			output("i= 4, break\n");
+			break;
+		}else{
+		output("i= ", i);
+        }
+        output("\n");
+	}
+    output("\n");
+
+	output("--- Teste de Laco WHILE ---\n");
+	j = 3;
+	while (j > 0) {
+		output("j= ", j);
+        output("\n");
+		j = j - 1;
+	}
+	output("\n");
+
+	output("--- Teste de Laco DO-WHILE ---\n");
+	k = 0;
+	do {
+		output("k= ", k);
+        output("\n");
+		k = k + 1;
+	} while (k < 3);
+}

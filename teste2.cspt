@@ -1,0 +1,36 @@
+def main {
+    var a = 10 > 1;
+
+	if (a) then {
+		output("--> Bloco THEN executado (CORRETO)\n");
+	} else {
+		output("--> Bloco ELSE executado (INCORRETO)\n");
+	}
+
+    a = !a;
+
+	if (a) then {
+		output("--> Bloco THEN executado (INCORRETO)\n");
+	} else {
+		output("--> Bloco ELSE executado (CORRETO)\n");
+	}
+
+    var b1 = true;
+    var b2 = false;
+
+    if (b1 || b2) then {
+		output("--> Bloco THEN executado\n");
+	} else {
+		output("--> Bloco ELSE executado\n");
+	}
+
+	var dia;
+	dia = 3;
+	switch (dia) {
+		case 1: output(" Segunda\n"); break;
+		case 2: output(" Terca\n"); break;
+		case 3: output(" Quarta\n"); break;
+		case 4: output(" Quinta\n"); break;
+		default: output(" Valor inesperado\n"); break;
+	}
+}

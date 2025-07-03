@@ -1,0 +1,33 @@
+def main {
+	output("--- Teste de Conversao de Tipos ---\n");
+
+	output("--- Conversao Implicita ---\n");
+	var i = 10;
+	var f;
+	i = 10;
+	f = 2.5;
+
+	var resultado;
+	resultado = i + f;
+	output(" ", resultado);
+
+	output("\n--- Conversao Explicita (Cast) ---\n");
+	var int1;
+	var int2;
+	int1 = 5;
+	int2 = 2;
+
+	var div_inteira;
+	div_inteira = int1 / int2;
+	output(" ", div_inteira);
+
+	var div_float;
+	div_float = (float)int1 / int2;
+	output(" ", div_float);
+
+	var f_original;
+	f_original = 99.9;
+	var i_cast;
+	i_cast = (int)f_original;
+	output(" ", i_cast);
+}

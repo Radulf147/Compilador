@@ -1,1088 +1,1672 @@
 %{
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdarg.h>
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <vector>
+#include <map>
+#include <unordered_map>
 
-extern int yylex();
-void yyerror(const char *s);
+#define YYSTYPE atributos
 
-// DEFINICOES E VARIAVEIS GLOBAIS
-#define HASH_TABLE_SIZE 101
-#define MAX_ESCOPOS 50
-#define MAX_ROTULOS_PILHA 100
-#define MAX_CASES 100
+using namespace std;
 
-int rotulo_count = 1;
-int temp_count = 1;
+int var_temp_qnt;
+int label_qnt;
+string traducaoTemp;
 
-// Variaveis para controle do SWITCH
-int temp_id_switch_expr = -1;
-int rotulo_default = -1;
-int num_cases = 0;
+struct atributos
+{
+	string label;
+	string traducao;
+	string tipo;
+	string tamanho = "";
+	string vetor_string = "";
+	string literal_value = "";
+	bool id = false;
+};
 
-// ESTRUTURAS DE DADOS
-typedef struct Simbolo {
-    char nome[50];
-    char tipo[20]; // Aumentado para nomes de tipo mais longos
-    int temp_id;
-    int tamanho;
-    struct Simbolo *next;
-} Simbolo;
+struct CaseInfo {
+    string constant_value_label;
+    string constant_value_type;
+    string code_target_label;
+	string traducao_exp_case;
+};
 
-typedef struct {
-    int valor_case;
-    int rotulo;
-} CaseInfo;
-CaseInfo lista_cases[MAX_CASES];
+struct DefaultInfo {
+    bool exists = false;
+    string code_target_label;
+};
 
-typedef struct TabelaDeSimbolos {
-    Simbolo* tabela[HASH_TABLE_SIZE];
-} TabelaDeSimbolos;
+struct Simbolo
+{
+	string label;
+	string tipo = "";
+	string tamanho = "";
+	string vetor_string = "";
+	bool tipado = false;
+	string rows_label = "";
+	string cols_label = "";
+	bool is_matrix = false;
+};
 
-TabelaDeSimbolos* pilha_de_tabelas[MAX_ESCOPOS];
-int nivel_escopo_atual = -1;
+struct SwitchContext {
+    std::vector<CaseInfo> cases; 
+    DefaultInfo default_info;
+    std::string end_label;
+};
 
-typedef struct CodegenDecl {
-    char definicao[100];
-    struct CodegenDecl *next;
-} CodegenDecl;
+/*vetores de declarações das variáveis locais e globais*/
+vector<string> declaracoes_locais;
+vector<string> declaracoes_globais;
+/*variável para saber se estamos no escopo global ainda ou não*/
+bool g_processando_escopo_global = true;
 
-typedef struct CodegenOp {
-    char instrucao[200];
-    struct CodegenOp *next;
-} CodegenOp;
+// Nova variável global para coletar os valores da lista de inicialização
+static vector<vector<atributos>> g_current_matrix_initializer;
 
-CodegenDecl *head_declaracoes_cg = NULL;
-CodegenDecl *tail_declaracoes_cg = NULL;
-CodegenOp *head_operacoes_cg = NULL;
-CodegenOp *tail_operacoes_cg = NULL;
+static vector<atributos> g_current_flat_initializer;
 
-// FUNCOES AUXILIARES
-int novo_rotulo() {
-    return rotulo_count++;
-}
+vector<unordered_map<string, Simbolo>> tabela;
+vector<string> rotulo_condicao;
+vector<string> rotulo_inicio;
+vector<string> rotulo_fim;
+vector<string> rotulo_incremento;
+static vector<CaseInfo> g_current_switch_cases;
+static DefaultInfo g_current_switch_default_info;
+static string g_current_switch_end_label;
+static vector<SwitchContext> g_switch_context_stack;
+vector<string> break_label_stack;
+vector<string> continue_label_stack;
 
-int pilha_rotulos[MAX_ROTULOS_PILHA];
-int ponteiro_pilha_rotulos = 0;
+map<string, map<string, string>> tipofinal;
 
-void push_rotulo(int rotulo) {
-    if (ponteiro_pilha_rotulos >= MAX_ROTULOS_PILHA) {
-        yyerror("Estouro da pilha de rotulos.");
-        exit(EXIT_FAILURE);
-    }
-    pilha_rotulos[ponteiro_pilha_rotulos++] = rotulo;
-}
 
-int pop_rotulo() {
-    if (ponteiro_pilha_rotulos <= 0) {
-        yyerror("Pilha de rotulos vazia.");
-        exit(EXIT_FAILURE);
-    }
-    return pilha_rotulos[--ponteiro_pilha_rotulos];
-}
+void guardaSimbolos(string nome);
+void removerEscopo();
+void adicionarEscopo();
+string genlabel();
+void removerRotulos();
+void desempilhar_contexto_case();  
+void declararVariavel(string tipo, string label, int tam_string);
+string cast_implicito(atributos* no1, atributos* no2, atributos* no3, string tipo);
+void atualizar(string tipo, string nome, string tamanho, string cadeia_char, string atualiza_label, string rows, string cols, bool matrix);
+int tamanho_string(string traducao);
+string retirar_aspas(string traducao, int tamanho);
+string string_intermediario(string buffer, string tamanho, string cond, string label);
+int yylex(void);
+void yyerror(string);
+string gentempcode();
+bool verifica_var(string name);
+Simbolo buscar(string name);
+string unescape_string(const char* s);
 
-void inicializar_listas_cg() {
-    CodegenDecl *decl_iter = head_declaracoes_cg;
-    while (decl_iter) {
-        CodegenDecl *temp = decl_iter;
-        decl_iter = decl_iter->next;
-        free(temp);
-    }
-    head_declaracoes_cg = tail_declaracoes_cg = NULL;
 
-    CodegenOp *op_iter = head_operacoes_cg;
-    while (op_iter) {
-        CodegenOp *temp = op_iter;
-        op_iter = op_iter->next;
-        free(temp);
-    }
-    head_operacoes_cg = tail_operacoes_cg = NULL;
-}
 
-void adicionar_declaracao_cg(const char* tipo, const char* nome_cg, int tamanho) {
-    char buffer[150];
-    const char* tipo_cg = tipo; // Usamos uma variável auxiliar
-
-    // ADICIONE ESTA VERIFICAÇÃO:
-    // Se o tipo interno for "bool", o tipo no código C gerado será "int".
-    if (strcmp(tipo, "bool") == 0) {
-        tipo_cg = "int";
-    }
-
-    // O resto da sua função continua igual, mas usando 'tipo_cg'
-    if (strcmp(tipo, "fixed_char_array") == 0) {
-        sprintf(buffer, "char %s[%d];", nome_cg, tamanho);
-    } else if (strcmp(tipo, "dynamic_string") == 0) {
-        sprintf(buffer, "char* %s;", nome_cg);
-    } else {
-        sprintf(buffer, "%s %s;", tipo_cg, nome_cg); // Usa o tipo potencialmente modificado
-    }
-    
-    // O restante da sua função para alocar e adicionar o nó continua o mesmo...
-    CodegenDecl *novo = (CodegenDecl*)malloc(sizeof(CodegenDecl));
-    if (!novo) { yyerror("Falha ao alocar memoria para declaracao CG"); exit(EXIT_FAILURE); }
-    strncpy(novo->definicao, buffer, sizeof(novo->definicao) - 1);
-    novo->definicao[sizeof(novo->definicao) - 1] = '\0';
-    novo->next = NULL;
-
-    if (tail_declaracoes_cg) {
-        tail_declaracoes_cg->next = novo;
-    } else {
-        head_declaracoes_cg = novo;
-    }
-    tail_declaracoes_cg = novo;
-}
-
-void adicionar_operacao_cg(const char* formato, ...) {
-    char buffer[200];
-    va_list args;
-    va_start(args, formato);
-    vsnprintf(buffer, sizeof(buffer), formato, args);
-    va_end(args);
-
-    CodegenOp *novo = (CodegenOp*)malloc(sizeof(CodegenOp));
-    if (!novo) { yyerror("Falha ao alocar memoria para operacao CG"); exit(EXIT_FAILURE); }
-    strncpy(novo->instrucao, buffer, sizeof(novo->instrucao) - 1);
-    novo->instrucao[sizeof(novo->instrucao) - 1] = '\0';
-    novo->next = NULL;
-
-    if (tail_operacoes_cg) {
-        tail_operacoes_cg->next = novo;
-    } else {
-        head_operacoes_cg = novo;
-    }
-    tail_operacoes_cg = novo;
-}
-
-void imprimir_codigo_cg() {
-    CodegenDecl *decl = head_declaracoes_cg;
-    while (decl) {
-        printf("    %s\n", decl->definicao);
-        decl = decl->next;
-    }
-
-    if (head_declaracoes_cg && head_operacoes_cg) {
-        printf("\n");
-    }
-
-    CodegenOp *op = head_operacoes_cg;
-    while (op) {
-        printf("    %s\n", op->instrucao);
-        op = op->next;
-    }
-}
-
-void liberar_listas_cg() {
-    inicializar_listas_cg();
-}
-
-unsigned int calcular_hash(char *nome) {
-    unsigned int hash_val = 0;
-    while (*nome) { hash_val = (hash_val << 5) + *nome++; }
-    return hash_val % HASH_TABLE_SIZE;
-}
-
-void entrar_escopo() {
-    if (nivel_escopo_atual >= MAX_ESCOPOS - 1) {
-        yyerror("Limite de aninhamento de escopo excedido.");
-        exit(EXIT_FAILURE);
-    }
-    nivel_escopo_atual++;
-    pilha_de_tabelas[nivel_escopo_atual] = (TabelaDeSimbolos*)malloc(sizeof(TabelaDeSimbolos));
-    if (!pilha_de_tabelas[nivel_escopo_atual]) {
-        yyerror("Falha ao alocar memoria para novo escopo.");
-        exit(EXIT_FAILURE);
-    }
-    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
-        pilha_de_tabelas[nivel_escopo_atual]->tabela[i] = NULL;
-    }
-}
-
-void sair_escopo() {
-    if (nivel_escopo_atual < 0) return;
-    TabelaDeSimbolos* tabela_atual = pilha_de_tabelas[nivel_escopo_atual];
-    for (int i = 0; i < HASH_TABLE_SIZE; i++) {
-        Simbolo *atual = tabela_atual->tabela[i];
-        while (atual != NULL) {
-            Simbolo *proximo = atual->next;
-            free(atual);
-            atual = proximo;
-        }
-    }
-    free(tabela_atual);
-    pilha_de_tabelas[nivel_escopo_atual] = NULL;
-    nivel_escopo_atual--;
-}
-
-int adicionar_simbolo(char *nome, char *tipo, int tamanho) {
-    if (nivel_escopo_atual < 0) {
-        yyerror("Tentativa de adicionar simbolo fora de qualquer escopo.");
-        return -1;
-    }
-    unsigned int indice = calcular_hash(nome);
-    TabelaDeSimbolos* tabela_atual = pilha_de_tabelas[nivel_escopo_atual];
-    Simbolo *simbolo_existente = tabela_atual->tabela[indice];
-    while (simbolo_existente != NULL) {
-        if (strcmp(simbolo_existente->nome, nome) == 0) {
-            char error_msg[100];
-            sprintf(error_msg, "Variavel '%s' redeclarada no mesmo escopo.", nome);
-            yyerror(error_msg);
-            if (nome) free(nome);
-            if (tipo) free(tipo);
-            return 1;
-        }
-        simbolo_existente = simbolo_existente->next;
-    }
-
-    Simbolo *novo_simbolo = (Simbolo*) malloc(sizeof(Simbolo));
-    if (!novo_simbolo) { yyerror("Falha ao alocar memoria para novo simbolo."); exit(EXIT_FAILURE); }
-    strcpy(novo_simbolo->nome, nome);
-    strcpy(novo_simbolo->tipo, tipo);
-    novo_simbolo->tamanho = tamanho;
-    novo_simbolo->temp_id = temp_count++;
-    novo_simbolo->next = tabela_atual->tabela[indice];
-    tabela_atual->tabela[indice] = novo_simbolo;
-    return novo_simbolo->temp_id;
-}
-
-Simbolo* obter_simbolo(char *nome) {
-    for (int i = nivel_escopo_atual; i >= 0; i--) {
-        unsigned int indice = calcular_hash(nome);
-        TabelaDeSimbolos* tabela = pilha_de_tabelas[i];
-        Simbolo *atual = tabela->tabela[indice];
-        while (atual != NULL) {
-            if (strcmp(atual->nome, nome) == 0) {
-                return atual;
-            }
-            atual = atual->next;
-        }
-    }
-    return NULL;
-}
-
-void yyerror(const char *s) {
-    fprintf(stderr, "Erro Sintatico/Semantico: %s\n", s);
-}
 %}
 
-%union {
-    int ival;
-    float fval;
-    char *str;
-    struct {
-        int temp_id;
-        char tipo[20];
-        char nome[50];
-        char str_val[256];
-    } expr_attr;
-    struct {
-        char nome_id[50];
-        int temp_id_expr;
-    } atribuicao_guardada_attr;
+%token KWD_NUM KWD_FLOAT KWD_CHAR KWD_BOOL KWD_RELACIONAL KWD_OU KWD_E KWD_NEG KWD_CAST KWD_VAR KWD_CADEIA_CHAR KWD_TIPO_INPUT KWD_PLUS_EQ KWD_MINUS_EQ KWD_MULT_EQ KWD_DIV_EQ
+%token KWD_MAIN KWD_DEF KWD_ID KWD_IF KWD_THEN KWD_ELSE KWD_WHILE KWD_DO KWD_FOR KWD_BREAK KWD_CONTINUE KWD_CPY KWD_CAT KWD_INPUT KWD_OUTPUT KWD_INC KWD_DEC
+%token KWD_SWITCH KWD_CASE KWD_DEFAULT
+// KWD_FIM KWD_ERROR
+%start S
+
+%left KWD_OU
+%left KWD_E
+%left KWD_RELACIONAL
+%left '+' '-'
+%left '*' '/'
+%right KWD_NEG KWD_INC KWD_DEC
+%left '(' ')' KWD_CAST
+
+%%
+
+S 			:LISTA_COMANDOS_GLOBAIS S_MAIN
+			{
+				string codigo = "#include<stdio.h>\n"
+								"#include<stdlib.h>\n"
+								"#include<string.h>\n\n";
+
+				for (int i = 0; i < declaracoes_globais.size(); i++) {
+					codigo += declaracoes_globais[i];
+				}
+
+				codigo += "\nint main() {\n";
+
+				for (int i = 0; i < declaracoes_locais.size(); i++) {
+					codigo += declaracoes_locais[i];
+				}	
+
+				codigo += "\n" + $1.traducao;
+
+				codigo += "\n" + $2.traducao;
+								
+				codigo += 	"\n\treturn 0;"
+							"\n}";
+
+				cout << codigo << endl;
+			}
+			;
+
+LISTA_COMANDOS_GLOBAIS :
+						{
+							$$.traducao = "";
+						}
+						| LISTA_COMANDOS_GLOBAIS COMANDO_GLOBAL
+						{
+							$$.traducao = $1.traducao + $2.traducao;
+						}
+						;
+
+S_MAIN : KWD_DEF KWD_MAIN
+		{
+			g_processando_escopo_global = false;
+		}
+		BLOCO
+		{
+			$$ = $4;
+		}
+		;
+COMANDO_GLOBAL : DEC ';'
+				{
+
+				}
+				| ATRI ';'
+				{
+
+				}
+				;
+BLOCO		: '{'{ adicionarEscopo();} COMANDOS '}'
+			{
+				$$.traducao = $3.traducao;
+				removerEscopo();
+			}
+			;
+COMANDOS	: COMANDO COMANDOS
+			{
+				$$.traducao = $1.traducao + $2.traducao;
+			}
+			|
+			{
+				$$.traducao = "";
+			}
+			;
+CRIAR_ROTULOS		:
+					{
+						rotulo_inicio.push_back(genlabel());
+						rotulo_condicao.push_back(genlabel());
+						rotulo_fim.push_back(genlabel());
+						rotulo_incremento.push_back(genlabel());
+
+						break_label_stack.push_back(rotulo_fim.back());
+						continue_label_stack.push_back(rotulo_condicao.back());
+
+					}
+					;
+RETIRAR_ROTULOS :
+                {
+                    if (!continue_label_stack.empty()) {
+                        continue_label_stack.pop_back();
+                    } else {
+                        yyerror("Pilha continue vazia no cleanup");
+                    }
+                    
+					if (!break_label_stack.empty()) {
+                        break_label_stack.pop_back();
+                    } else {
+                        yyerror("Pilha break vazia no cleanup");
+                    }
+
+                }
+                ;
+
+CRIAR_ROTULOS_FOR 	:
+            		{
+        				rotulo_condicao.push_back(genlabel());
+        				rotulo_incremento.push_back(genlabel());
+        				rotulo_fim.push_back(genlabel());
+						rotulo_inicio.push_back(genlabel());
+
+        				break_label_stack.push_back(rotulo_fim.back());
+        				continue_label_stack.push_back(rotulo_incremento.back());
+                    }
+                    ;
+
+COMANDO 	: E ';'
+			{
+				$$ = $1;
+			}
+			| ATRI ';'
+			| DEC ';'
+			| BLOCO
+			| KWD_IF '(' E ')' KWD_THEN BLOCO
+			{
+                if($3.tipo != "bool") {
+                    yyerror("A expressao condicional 'if' deve ser do tipo booleano.");
+                }
+
+                string temp_negated_expr = gentempcode();
+                declararVariavel("bool", temp_negated_expr, -1);
+
+                string fim_label = genlabel();
+                $$.traducao = $3.traducao; 
+                $$.traducao += "\t" + temp_negated_expr + " = !" + $3.label + ";\n";
+                $$.traducao += string("\t") + "if (" + temp_negated_expr + ") goto " + fim_label + ";\n";
+                $$.traducao += $6.traducao;
+                $$.traducao += fim_label + ":\n";
+                $$.tipo = "";
+                $$.label = "";
+
+			}
+			| KWD_IF '(' E ')' KWD_THEN BLOCO KWD_ELSE BLOCO
+			{
+                if($3.tipo != "bool") {
+                    yyerror("A expressao condicional 'if' deve ser do tipo booleano.");
+                }
+
+                string else_label = genlabel();
+                string end_if_label = genlabel();
+
+                string temp_negated_expr = gentempcode();
+                declararVariavel("bool", temp_negated_expr, -1);
+
+                $$.traducao = $3.traducao;
+                $$.traducao += "\t" + temp_negated_expr + " = !" + $3.label + ";\n";
+                $$.traducao += string("\t") + "if (" + temp_negated_expr + ") goto " + else_label + ";\n";
+                $$.traducao += $6.traducao;
+                $$.traducao += string("\tgoto ") + end_if_label + ";\n";
+                $$.traducao += else_label + ":\n";
+                $$.traducao += $8.traducao;
+                $$.traducao += end_if_label + ":\n";
+
+                $$.tipo = ""; 
+                $$.label = "";
+			}
+			| KWD_WHILE '(' E ')' CRIAR_ROTULOS BLOCO RETIRAR_ROTULOS
+			{
+                if($3.tipo != "bool") {
+                    yyerror("A expressao condicional 'while' deve ser do tipo booleano.");
+                }
+
+                string temp_negated_expr = gentempcode();
+                declararVariavel("bool", temp_negated_expr, -1);
+
+                $$.traducao = rotulo_condicao.back() + ":\n";
+                $$.traducao += $3.traducao;
+                $$.traducao += "\t" + temp_negated_expr + " = !" + $3.label + ";\n";
+                $$.traducao += string("\t") + "if (" + temp_negated_expr + ") goto " + rotulo_fim.back() + ";\n";
+                $$.traducao += $6.traducao;
+                $$.traducao += string("\tgoto ") + rotulo_condicao.back() + ";\n";
+                $$.traducao += rotulo_fim.back() + ":\n";
+
+				removerRotulos();
+
+                $$.tipo = ""; 
+                $$.label = "";
+			}
+			| KWD_DO CRIAR_ROTULOS BLOCO RETIRAR_ROTULOS KWD_WHILE '(' E ')' ';'
+			{
+                if($7.tipo != "bool") {
+                    yyerror("A expressao condicional 'do-while' deve ser do tipo booleano.");
+                }
+
+                $$.traducao = rotulo_inicio.back() + ":\n";
+                $$.traducao += $3.traducao;
+				$$.traducao += rotulo_condicao.back() + ":\n";
+                $$.traducao += $7.traducao;
+                $$.traducao += string("\t") + "if (" + $7.label + ") goto " + rotulo_inicio.back() + ";\n";
+				$$.traducao += rotulo_fim.back() + ":\n";
+
+				removerRotulos();
+
+                $$.tipo = ""; 
+                $$.label = "";
+			}
+			| KWD_FOR '(' INTERMEDIARIO_FOR ';' E ';' ATRI ')' CRIAR_ROTULOS_FOR BLOCO RETIRAR_ROTULOS
+			{
+                if($5.tipo != "bool") {
+                    yyerror("A expressao de condicao no loop 'for' deve ser do tipo booleano.");
+                }
+
+                string temp_negated_cond = gentempcode();
+                declararVariavel("bool", temp_negated_cond, -1);
+
+                $$.traducao = $3.traducao;
+                $$.traducao += rotulo_condicao.back() + ":\n";
+                $$.traducao += $5.traducao;
+                $$.traducao += "\t" + temp_negated_cond + " = !" + $5.label + ";\n";
+                $$.traducao += string("\t") + "if (" + temp_negated_cond + ") goto " + rotulo_fim.back() + ";\n";
+                $$.traducao += $10.traducao;
+				$$.traducao += rotulo_incremento.back() + ":\n";
+                $$.traducao += $7.traducao;
+                $$.traducao += string("\tgoto ") + rotulo_condicao.back() + ";\n";
+                $$.traducao += rotulo_fim.back() + ":\n";
+
+				removerRotulos();
+
+                $$.tipo = ""; 
+                $$.label = "";
+			}
+			| KWD_BREAK ';'
+			{
+				if (break_label_stack.empty()) {
+                    yyerror("Comando 'break' utilizado fora de um loop.");
+                } else {
+                    $$.traducao = string("\tgoto ") + break_label_stack.back() + ";\n";
+                }
+                
+				$$.tipo = ""; 
+				$$.label = "";
+			}
+			| KWD_CONTINUE ';'
+			{
+				if (continue_label_stack.empty()) {
+                    yyerror("Comando 'continue' utilizado fora de um loop.");
+                } else {
+                    $$.traducao = string("\tgoto ") + continue_label_stack.back() + ";\n";
+                }
+
+                $$.tipo = ""; 
+				$$.label = "";
+			}
+			| KWD_SWITCH '(' E ')' SWITCH_SETUP '{' CASE_STATEMENTS_LIST '}' SWITCH_CLEANUP
+			{
+				if (g_switch_context_stack.empty()) {
+                	yyerror("Contexto de switch nao encontrado ao finalizar o switch.");
+                	$$.traducao = "";
+            	} else {
+                	const SwitchContext& current_context = g_switch_context_stack.back();
+
+                	string switch_expr_traducao = $3.traducao;
+                	string switch_expr_val_label = $3.label;
+                	string switch_expr_tipo = $3.tipo;
+
+                	string dispatch_code;
+                	string case_bodies_code = $7.traducao;
+
+                	for (const auto& ci : current_context.cases) {
+                    	if (tipofinal[switch_expr_tipo][ci.constant_value_type] == "float" || tipofinal[switch_expr_tipo][ci.constant_value_type] == "erro") {
+                        	yyerror("Switch ou case de tipos incompativeis.");
+                       	}
+
+                    	string temp_cond = gentempcode();
+                        declararVariavel("bool", temp_cond, -1);
+					    dispatch_code += ci.traducao_exp_case;
+                        dispatch_code += "\t" + temp_cond + " = (" + switch_expr_val_label + " == " + ci.constant_value_label + ");\n";
+                        dispatch_code += string("\t") + "if (" + temp_cond + ") goto " + ci.code_target_label + ";\n";
+                	}
+
+                	if (current_context.default_info.exists) {
+                        dispatch_code += "\tgoto " + current_context.default_info.code_target_label + ";\n";
+                	} else {
+                        dispatch_code += "\tgoto " + current_context.end_label + ";\n";
+                	}
+
+                	$$.traducao = switch_expr_traducao + dispatch_code + case_bodies_code + current_context.end_label + ":\n";
+
+				    desempilhar_contexto_case();
+                    $$.tipo = "";
+                    $$.label = "";
+            	}
+        	}
+			| KWD_OUTPUT '(' OUTPUT ')' ';' 
+            {
+                $$.traducao = $3.traducao;
+                $$.tipo = "";
+                $$.label = "";
+            }
+			| KWD_ID '=' KWD_INPUT '(' KWD_TIPO_INPUT ')' ';' 
+            {
+                if(!verifica_var($1.label)) {
+                    yyerror("Variavel '" + $1.label + "' nao declarada para input.");
+                }
+
+                Simbolo variavel_destino = buscar($1.label);
+
+				if($5.tipo == "string"){
+					if (variavel_destino.tipo != "string" && variavel_destino.tipado == true) {
+                        yyerror("Variavel '" + $1.label + "' do tipo " + variavel_destino.tipo + " nao pode receber input de string.");
+					}
+					string tamanho = gentempcode();
+					declararVariavel("int", tamanho, -1);
+					string buffer = gentempcode();
+					declararVariavel("char*", buffer, -1);
+					string cond = gentempcode();
+					declararVariavel("bool", cond, -1);
+					string label = genlabel();
+					string temp_ponteiro = gentempcode();
+
+					declararVariavel("char*", temp_ponteiro, -1);
+					atualizar("string", $1.label, tamanho, "", temp_ponteiro, "", "", false);
+
+					$$.traducao += "\t" + buffer + " = malloc(256);\n" +
+					"\tfgets(" + buffer + ", 256, stdin);\n" +
+					string_intermediario(buffer, tamanho, cond, label) +
+					"\t" + temp_ponteiro + " = malloc(" + tamanho + ");\n" +
+					"\tstrcpy(" + temp_ponteiro + ", " + buffer + ");\n" +
+					"\tfree(" + buffer + ");\n";
+
+					$$.label = temp_ponteiro;
+				}
+
+				if($5.tipo == "int" || $5.tipo == "float" || $5.tipo == "char"){
+					if(variavel_destino.tipo != $5.tipo && variavel_destino.tipado == true){
+						yyerror("Variavel '" + $1.label + "' do tipo " + variavel_destino.tipo + " nao pode receber input de " + $5.tipo + ".");
+					}
+
+					string var = gentempcode();
+					declararVariavel($5.tipo, var, -1);
+					$$.traducao += "\tscanf(\"" + $5.label + "\", &" + var + ");\n";
+
+					atualizar($5.tipo, $1.label, "", "", var, "", "", false);
+					$$.label = var;
+				}
+
+                $$.tipo = $5.tipo;
+            }
+			| KWD_CAT '(' KWD_ID ',' KWD_ID ')' ';'
+			{
+				Simbolo simbolo1 = buscar($3.label); 
+				Simbolo simbolo2 = buscar($5.label); 
+
+				if (simbolo1.label == simbolo2.label) yyerror("IMpossivel concatenar origem e destino de mesmo endereço.");
+				if(tipofinal[simbolo1.tipo][simbolo2.tipo] != "string") {
+					yyerror("Concatenacao com tipos inválidos");
+				}
+
+				int len1 = stoi(simbolo1.tamanho) - 1; 
+				int len2 = stoi(simbolo2.tamanho) - 1; 
+				
+				int tamcat_total_alocado = len1 + len2 + 1; 
+				string cat = simbolo1.vetor_string + simbolo2.vetor_string; 
+
+				string resultado_temp_c_label = gentempcode();
+
+				declararVariavel("char*", resultado_temp_c_label, -1); 
+
+				$$.traducao = ""; 
+
+				$$.traducao += "\t" + resultado_temp_c_label + " = (char*)malloc(" + to_string(tamcat_total_alocado) + ");\n";
+				$$.traducao += "\tstrcpy(" + resultado_temp_c_label + ", " + simbolo1.label + ");\n";
+				$$.traducao += "\tstrcat(" + resultado_temp_c_label + ", " + simbolo2.label + ");\n";
+
+				$$.tipo = "string";
+				$$.tamanho = to_string(tamcat_total_alocado); 
+
+				$$.traducao += "\tfree(" + simbolo1.label + ");\n"; 
+				$$.traducao += "\t" + simbolo1.label + " = " + resultado_temp_c_label + ";\n"; 
+
+				atualizar($$.tipo, $3.label, $$.tamanho, cat, simbolo1.label, "", "", false); 
+			}
+			;
+SWITCH_SETUP :
+            {
+                SwitchContext current_switch_details;
+                current_switch_details.end_label = genlabel();
+                
+                break_label_stack.push_back(current_switch_details.end_label);
+
+                g_switch_context_stack.push_back(current_switch_details);
+            }
+            ;
+SWITCH_CLEANUP :
+            {
+                if (!break_label_stack.empty()) {
+                    break_label_stack.pop_back();
+                } else {
+                    yyerror("Pilha de break vazia no cleanup do switch");
+                }
+            }
+            ;
+			
+INTERMEDIARIO_FOR: KWD_ID '=' E
+			{
+				traducaoTemp = "";
+
+				if(!verifica_var($1.label)) {
+					yyerror("Variavel nao declarada.");
+				}
+
+				Simbolo variavel;
+				variavel = buscar($1.label);
+
+				if(variavel.tipado == false && $3.tipo == "int") {
+					atualizar($3.tipo, $1.label, "", "", "", "", "", false);
+					declararVariavel($3.tipo, variavel.label, -1);
+					variavel.tipo = $3.tipo;
+				} else if(variavel.tipado == true){
+					yyerror("Variavel no parametro do for já tem um valor atribuido!");
+				}
+
+				$$.traducao += $1.traducao + $3.traducao + "\t" + variavel.label + " = " + $3.label + ";\n";
+			}
+			| KWD_VAR KWD_ID '=' E
+			{
+				if($4.tipo != "int"){
+					yyerror("Tipo incompativel de atribuicao a uma variavel utilizada de parametro no for!");
+				}
+				if(verifica_var($2.label)) {
+                    yyerror("Voce ja declarou essa variavel: " + $2.label);
+                }
+
+				guardaSimbolos($2.label);
+
+				$$.label = "";
+				$$.traducao = "";
+				$$.tipo = "";
+				$$.tamanho = "";
+				$$.vetor_string = "";
+
+				Simbolo variavel;
+				variavel = buscar($2.label);
+
+				if(variavel.tipado == false) {
+					atualizar($4.tipo, $2.label, "", "", "", "", "", false);
+					declararVariavel($4.tipo, variavel.label, -1);
+					variavel.tipo = $4.tipo;
+				}
+
+				$2.tipo = variavel.tipo;
+				$2.label = variavel.label;
+
+				$$.traducao += $2.traducao + $4.traducao + "\t" + $2.label + " = " + $4.label + ";\n";
+				
+			};
+
+CASE_STATEMENTS_LIST :
+            {
+                $$.traducao = "";
+            }
+            | CASE_STATEMENTS_LIST_NON_EMPTY
+            ;
+CASE_STATEMENTS_LIST_NON_EMPTY : CASE_OR_DEFAULT_ITEM
+            | CASE_STATEMENTS_LIST_NON_EMPTY CASE_OR_DEFAULT_ITEM
+            { $$.traducao = $1.traducao + $2.traducao; }
+            ;
+CASE_OR_DEFAULT_ITEM : CASE_CLAUSE
+            | DEFAULT_CLAUSE
+            ;
+
+CASE_CLAUSE : KWD_CASE E ':' COMANDOS
+            {
+                if ($2.tipo != "int" && $2.tipo != "char" && $2.tipo != "bool") {
+                    yyerror("Constante do 'case' deve ser do tipo int, char ou bool. Encontrado: " + $2.tipo);
+                }
+
+                if (g_switch_context_stack.empty()) {
+                    yyerror("'case' encontrado fora de um contexto de switch ativo.");
+                
+                } else {
+                    CaseInfo ci;
+                    ci.constant_value_label = $2.label;
+                    ci.constant_value_type = $2.tipo;
+                    ci.code_target_label = genlabel();
+					ci.traducao_exp_case = $2.traducao;
+                    g_switch_context_stack.back().cases.push_back(ci);
+
+                    $$.traducao = ci.code_target_label + ":\n" + $4.traducao;
+                    $$.label = ci.code_target_label;
+                    $$.tipo = "";
+                }
+            }
+            ;
+
+DEFAULT_CLAUSE : KWD_DEFAULT ':' COMANDOS
+            {
+                if (g_switch_context_stack.empty()) {
+                    yyerror("'default' encontrado fora de um contexto de switch ativo.");
+                } else {
+                    SwitchContext& current_active_switch = g_switch_context_stack.back();
+                    if (current_active_switch.default_info.exists) {
+                        yyerror("Multiplos 'default' no mesmo switch.");
+                    }
+                    current_active_switch.default_info.exists = true;
+                    current_active_switch.default_info.code_target_label = genlabel();
+
+                    $$.traducao = current_active_switch.default_info.code_target_label + ":\n" + $3.traducao;
+                    $$.label = current_active_switch.default_info.code_target_label;
+                    $$.tipo = "";
+                }
+            }
+            ;
+
+OUTPUT      : E
+            {
+                string format_specifier;
+                string valor_a_imprimir = $1.label;
+
+                if ($1.tipo == "int" || $1.tipo == "bool") {
+                    format_specifier = "%d";
+                } else if ($1.tipo == "float") {
+                    format_specifier = "%f";
+                } else if ($1.tipo == "char") {
+                    format_specifier = "%c";
+                } else if ($1.tipo == "string") {
+                    format_specifier = "%s";
+                } else {
+                    yyerror("Tentando imprimir uma expressao de tipo invalido ou desconhecido: " + $1.tipo);
+                }
+
+                $$.traducao = $1.traducao + "\tprintf(\"" + format_specifier + "\", " + valor_a_imprimir + ");\n";
+                $$.label = "";
+                $$.tipo = "";
+            }
+            | OUTPUT ',' E
+            {
+                $$.traducao = $1.traducao;
+                
+                string format_specifier;
+                string valor_a_imprimir = $3.label;
+
+                if ($3.tipo == "int" || $3.tipo == "bool") {
+                    format_specifier = "%d";
+                } else if ($3.tipo == "float") {
+                    format_specifier = "%f";
+                } else if ($3.tipo == "char") {
+                    format_specifier = "%c";
+                } else if ($3.tipo == "string") {
+                    format_specifier = "%s";
+                } else {
+                    yyerror("Tentando imprimir uma expressao de tipo invalido ou desconhecido: " + $3.tipo);
+                }
+
+                $$.traducao += $3.traducao + "\tprintf(\"" + format_specifier + "\", " + valor_a_imprimir + ");\n";
+                $$.label = "";
+                $$.tipo = "";
+            }
+            ;
+OP_ATRIBUICAO : KWD_PLUS_EQ { $$.label = "+";}
+			  | KWD_MINUS_EQ { $$.label = "-";}
+			  | KWD_MULT_EQ { $$.label = "*";}
+			  | KWD_DIV_EQ { $$.label = "/";}
+			  ;
+ATRI 		:KWD_ID '=' E
+			{
+				traducaoTemp = "";
+
+				if(!verifica_var($1.label)) {
+					yyerror("Variavel nao declarada.");
+				}
+
+				Simbolo variavel;
+				variavel = buscar($1.label);
+
+				if(variavel.tipado == false) {
+					if($3.tipo == "string" ){
+						atualizar($3.tipo, $1.label, $3.tamanho, $3.vetor_string, "", "", "", false);
+						declararVariavel($3.tipo, variavel.label, stoi($3.tamanho));
+						variavel.tipo = $3.tipo;
+						variavel.tamanho = $3.tamanho;
+						$1.tamanho = $3.tamanho;
+						$1.vetor_string = $3.vetor_string;
+					}else{
+						atualizar($3.tipo, $1.label, "", "", "", "", "", false);
+						declararVariavel($3.tipo, variavel.label, -1);
+						variavel.tipo = $3.tipo;
+					}
+				}
+
+				$1.tipo = variavel.tipo;
+				$1.label = variavel.label;
+
+				if(tipofinal[$1.tipo][$3.tipo] == "erro") yyerror("Operação com tipos inválidos");
+
+				traducaoTemp = cast_implicito(&$$, &$1, &$3, "atribuicao");
+				if($1.tipo == "string" && $3.tipo == "string" && $3.id){
+					$$.traducao += $1.traducao + $3.traducao + traducaoTemp + 
+					"\t" + $1.label + " = (char *) realloc(" + $1.label + ", " + $3.tamanho + ");\n" +
+					"\tstrcpy(" + $1.label + ", " + $3.label + ");\n";
+				}else if($1.tipo == "string" && $3.tipo == "string"){
+					$$.traducao += $1.traducao + $3.traducao + traducaoTemp + 
+					"\t" + $1.label + " = (char *) malloc(" + $3.tamanho + " * sizeof(char));\n" +
+					"\tstrcpy(" + $1.label + ", " + $3.label + ");\n";
+				}else{
+					$$.traducao += $1.traducao + $3.traducao + traducaoTemp + "\t" + $1.label + " = " + $3.label + ";\n";
+				}
+			}
+			| KWD_ID '[' E ']' '[' E ']' '=' E
+			{
+				if (!verifica_var($1.label)) {
+					yyerror("Matriz '" + $1.label + "' nao declarada.");
+				}
+
+				Simbolo s = buscar($1.label);
+				if (!s.is_matrix) {
+					yyerror("Variavel '" + $1.label + "' nao eh uma matriz.");
+				}
+
+				atributos rhs_attrs = $9;
+
+				$$.traducao = $3.traducao + $6.traducao + rhs_attrs.traducao;
+
+				if (s.tipado == false) {
+					string inferred_type = rhs_attrs.tipo;
+					
+					if (inferred_type == "string") {
+						declararVariavel("char**", s.label, -1);
+						string temp_total_size = gentempcode();
+						declararVariavel("int", temp_total_size, -1);
+						$$.traducao += "\t" + temp_total_size + " = " + s.rows_label + " * " + s.cols_label + ";\n";
+						$$.traducao += "\t" + s.label + " = (char**) malloc(sizeof(char*) * " + temp_total_size + ");\n";
+						
+					} else {
+						string tipo_c_ptr = inferred_type;
+						if (tipo_c_ptr == "bool") tipo_c_ptr = "int";
+						declararVariavel(tipo_c_ptr + "*", s.label, -1);
+						
+						string temp_total_size = gentempcode();
+						declararVariavel("int", temp_total_size, -1);
+						$$.traducao += "\t" + temp_total_size + " = " + s.rows_label + " * " + s.cols_label + ";\n";
+						$$.traducao += "\t" + s.label + " = (" + tipo_c_ptr + "*) malloc(sizeof(" + tipo_c_ptr + ") * " + temp_total_size + ");\n";
+					}
+					
+					atualizar(inferred_type, $1.label, "", "", "", s.rows_label, s.cols_label, true);
+					s.tipo = inferred_type; 
+				
+				} else {
+					if (tipofinal[s.tipo][rhs_attrs.tipo] == "erro") {
+						yyerror("A matriz '" + $1.label + "' eh do tipo " + s.tipo + " e nao pode receber uma atribuicao do tipo " + rhs_attrs.tipo);
+					}
+					if (s.tipo != rhs_attrs.tipo) {
+						atributos lhs_attrs;
+						lhs_attrs.tipo = s.tipo;
+						$$.traducao += cast_implicito(&$$, &lhs_attrs, &rhs_attrs, "atribuicao");
+					}
+				}
+
+				string temp_mult = gentempcode();
+				declararVariavel("int", temp_mult, -1);
+				$$.traducao += "\t" + temp_mult + " = " + $3.label + " * " + s.cols_label + ";\n"; 
+
+				string temp_index = gentempcode();
+				declararVariavel("int", temp_index, -1);
+				$$.traducao += "\t" + temp_index + " = " + temp_mult + " + " + $6.label + ";\n";
+				
+				if (s.tipo == "string") {
+					$$.traducao += "\t" + s.label + "[" + temp_index + "] = (char*) malloc(sizeof(char) * " + rhs_attrs.tamanho + ");\n";
+					$$.traducao += "\tstrcpy(" + s.label + "[" + temp_index + "], " + rhs_attrs.label + ");\n";
+				} else {
+					$$.traducao += "\t" + s.label + "[" + temp_index + "] = " + rhs_attrs.label + ";\n";
+				}
+			}
+			| KWD_ID OP_ATRIBUICAO E
+			{
+        		Simbolo lhs_var = buscar($1.label);
+        		if (!lhs_var.tipado) {
+            		yyerror("Variavel '" + $1.label + "' usada em operacao composta antes de ser tipada.");
+        		}
+
+        		if (lhs_var.tipo == "string" && $2.label == "+") {
+            		if ($3.tipo != "string") {
+                		yyerror("Operador '+=' em uma string requer outra string como operando.");
+            		}
+            
+            		string novo_tamanho_label = gentempcode();
+            		declararVariavel("int", novo_tamanho_label, -1);
+            
+            		$$.traducao = $3.traducao; 
+            		$$.traducao += "\t" + novo_tamanho_label + " = strlen(" + lhs_var.label + ") + strlen(" + $3.label + ") + 1;\n";
+            		$$.traducao += "\t" + lhs_var.label + " = (char*) realloc(" + lhs_var.label + ", " + novo_tamanho_label + ");\n";
+            		$$.traducao += "\tstrcat(" + lhs_var.label + ", " + $3.label + ");\n";
+
+            		atualizar(lhs_var.tipo, $1.label, novo_tamanho_label, "", lhs_var.label, "", "", false);
+
+        		} else { 
+            		if (tipofinal[lhs_var.tipo][$3.tipo] == "erro" || tipofinal[lhs_var.tipo][$3.tipo] == "string") {
+                		yyerror("Operador '" + $2.label + "=' com tipos incompativeis: " + lhs_var.tipo + " e " + $3.tipo);
+            		}
+
+            		$$.traducao = $3.traducao;
+            
+            		string op_result_temp = gentempcode();
+            		string op_result_tipo = tipofinal[lhs_var.tipo][$3.tipo];
+            		declararVariavel(op_result_tipo, op_result_temp, -1);
+            		$$.traducao += "\t" + op_result_temp + " = " + lhs_var.label + " " + $2.label + " " + $3.label + ";\n";
+
+            		$$.traducao += "\t" + lhs_var.label + " = " + op_result_temp + ";\n";
+        		}
+			}
+			| OPERADORES_UNARIOS
+			;
+INITIALIZER_SETUP :
+				  {
+					g_current_matrix_initializer.clear();
+				  }
+				  ;
+INITIALIZER : '{' INITIALIZER_SETUP ROW_LIST '}'
+			;
+
+ROW_LIST : ROW
+		 | ROW_LIST ',' ROW
+		 ;
+ROW : '{' 
+	{
+		g_current_matrix_initializer.push_back({});
+	}
+	ELEMENT_LIST '}'
+	;
+ELEMENT_LIST : E
+			 {
+				g_current_matrix_initializer.back().push_back($1);
+			 }
+			 | ELEMENT_LIST ',' E
+			 {
+				g_current_matrix_initializer.back().push_back($3);
+			 }
+			 ;
+
+FLAT_INITIALIZER_SETUP :
+						{
+							g_current_flat_initializer.clear();
+						}
+						;
+FLAT_INITIALIZER : '{' FLAT_INITIALIZER_SETUP FLAT_ELEMENT_LIST '}'
+				 ;
+FLAT_ELEMENT_LIST : E
+				  {
+					g_current_flat_initializer.push_back($1);
+				  }
+				  | FLAT_ELEMENT_LIST ',' E
+				  {
+					g_current_flat_initializer.push_back($3);
+				  }
+				  ;
+DEC			:KWD_VAR KWD_ID
+			{
+				if(verifica_var($2.label)) {
+					yyerror("Variavel já declarada.\n");
+				}
+
+				guardaSimbolos($2.label);
+
+				$$.label = "";
+				$$.traducao = "";
+				$$.tipo = "";
+				$$.tamanho = "";
+				$$.vetor_string = "";
+
+			}
+			| KWD_VAR KWD_ID '[' E ']' '[' E ']'
+			{
+			  if(verifica_var($2.label)) {
+                    yyerror("Voce ja declarou essa variavel: " + $2.label);
+              }
+              if ($4.tipo != "int" || $7.tipo != "int") {
+                    yyerror("As dimensoes da matriz devem ser do tipo inteiro.");
+              }
+
+              guardaSimbolos($2.label); 
+
+			  atualizar("", $2.label, "", "", "", $4.label, $7.label, true);
+
+			  $$.traducao = $4.traducao + $7.traducao;
+			  $$.label = "";
+			  $$.tipo = "";
+			}
+			| KWD_VAR KWD_ID '=' E
+			{
+				if(verifica_var($2.label)) {
+                    yyerror("Voce ja declarou essa variavel: " + $2.label);
+                }
+
+				guardaSimbolos($2.label);
+
+				$$.label = "";
+				$$.traducao = "";
+				$$.tipo = "";
+				$$.tamanho = "";
+				$$.vetor_string = "";
+
+				Simbolo variavel;
+				variavel = buscar($2.label);
+
+				if(variavel.tipado == false) {
+					if($4.tipo == "string" ){
+						atualizar($4.tipo, $2.label, $4.tamanho, $4.vetor_string, "", "", "", false);
+						declararVariavel($4.tipo, variavel.label, stoi($4.tamanho));
+						variavel.tipo = $4.tipo;
+						variavel.tamanho = $4.tamanho;
+						$2.tamanho = $4.tamanho;
+						$2.vetor_string = $4.vetor_string;
+					}else{
+						atualizar($4.tipo, $2.label, "", "", "", "", "", false);
+						declararVariavel($4.tipo, variavel.label, -1);
+						variavel.tipo = $4.tipo;
+					}
+				}
+
+				$2.tipo = variavel.tipo;
+				$2.label = variavel.label;
+
+				if(tipofinal[$2.tipo][$4.tipo] == "erro") yyerror("Operação com tipos inválidos");
+
+				traducaoTemp = "";
+				traducaoTemp = cast_implicito(&$$, &$2, &$4, "atribuicao");
+				if($2.tipo == "string" && $4.tipo == "string" && $4.id){
+					$$.traducao += $2.traducao + $4.traducao + traducaoTemp + 
+					"\t" + $2.label + " = (char *) realloc(" + $2.label + ", " + $4.tamanho + ");\n" +
+					"\tstrcpy(" + $2.label + ", " + $4.label + ");\n";
+				}else if($2.tipo == "string" && $4.tipo == "string"){
+					$$.traducao += $2.traducao + $4.traducao + traducaoTemp + 
+					"\t" + $2.label + " = (char *) malloc(" + $4.tamanho + " * sizeof(char));\n" +
+					"\tstrcpy(" + $2.label + ", " + $4.label + ");\n";
+				}else{
+					$$.traducao += $2.traducao + $4.traducao + traducaoTemp + "\t" + $2.label + " = " + $4.label + ";\n";
+				}
+			}
+			| KWD_VAR KWD_ID '[' E ']' '[' E ']' '=' INITIALIZER
+			{
+                if(verifica_var($2.label)) {
+                    yyerror("Voce ja declarou essa variavel: " + $2.label);
+                }
+                if ($4.tipo != "int" || $7.tipo != "int") {
+                    yyerror("As dimensoes da matriz devem ser do tipo inteiro constante.");
+                }
+                if (g_current_matrix_initializer.empty() || g_current_matrix_initializer[0].empty()) {
+                    yyerror("Lista de inicializacao da matriz '" + $2.label + "' nao pode ser vazia.");
+                }
+
+                int declared_rows = stoi($4.literal_value);
+                int declared_cols = stoi($7.literal_value);
+        
+                if (g_current_matrix_initializer.size() != declared_rows) {
+                    yyerror("Numero de linhas no inicializador (" + to_string(g_current_matrix_initializer.size()) + ") eh diferente do declarado (" + to_string(declared_rows) + ").");
+                }
+        
+				string inferred_type = g_current_matrix_initializer[0][0].tipo;
+				string all_expressions_code;
+
+				for (size_t i = 0; i < g_current_matrix_initializer.size(); ++i) {
+					if (g_current_matrix_initializer[i].size() != declared_cols) {
+						yyerror("Numero de colunas na linha " + to_string(i) + " do inicializador eh diferente do declarado (" + to_string(declared_cols) + ").");
+					}
+					for (size_t j = 0; j < g_current_matrix_initializer[i].size(); ++j) {
+						atributos& current_elem = g_current_matrix_initializer[i][j];
+						all_expressions_code += current_elem.traducao;
+						
+						if (inferred_type != current_elem.tipo) {
+							bool cast_valido = (inferred_type == "float" && current_elem.tipo == "int") || (inferred_type == "int" && current_elem.tipo == "float");
+							if (cast_valido) {
+								string casted_temp_label = gentempcode();
+								string c_type_for_decl = inferred_type;
+								if(c_type_for_decl == "bool") c_type_for_decl = "int";
+								
+								declararVariavel(inferred_type, casted_temp_label, -1);
+								all_expressions_code += "\t" + casted_temp_label + " = (" + c_type_for_decl + ")" + current_elem.label + ";\n";
+								current_elem.label = casted_temp_label;
+							} else {
+								yyerror("Tipos incompativeis na inicializacao. Esperado " + inferred_type + ", mas encontrado " + current_elem.tipo + ".");
+							}
+						}
+					}
+				}
+
+				guardaSimbolos($2.label);
+				Simbolo s = buscar($2.label);
+				atualizar(inferred_type, $2.label, "", "", "", $4.literal_value, $7.literal_value, true);
+				
+				string tipo_c = inferred_type;
+				if (tipo_c == "bool") tipo_c = "int";
+				
+				declararVariavel(tipo_c + "*", s.label, -1);
+
+				string temp_total_size = gentempcode();
+				declararVariavel("int", temp_total_size, -1);
+				$$.traducao = $4.traducao + $7.traducao;
+				$$.traducao += "\t" + temp_total_size + " = " + $4.literal_value + " * " + $7.literal_value + ";\n";
+				$$.traducao += "\t" + s.label + " = (" + tipo_c + "*) malloc(sizeof(" + tipo_c + ") * " + temp_total_size + ");\n";
+				$$.traducao += all_expressions_code;
+
+				for (int i = 0; i < declared_rows; ++i) {
+					for (int j = 0; j < declared_cols; ++j) {
+						string temp_index = gentempcode();
+						declararVariavel("int", temp_index, -1);
+						string valor_label = g_current_matrix_initializer[i][j].label;
+						$$.traducao += "\t" + temp_index + " = " + to_string(i) + " * " + $7.literal_value + " + " + to_string(j) + ";\n";
+						$$.traducao += "\t" + s.label + "[" + temp_index + "] = " + valor_label + ";\n";
+					}
+				}
+			}
+			| KWD_VAR KWD_ID '[' E ']' '[' E ']' '=' FLAT_INITIALIZER
+			{
+				if(verifica_var($2.label)) { yyerror("Voce ja declarou essa variavel: " + $2.label); }
+				if ($4.tipo != "int" || $7.tipo != "int") { yyerror("As dimensoes da matriz devem ser do tipo inteiro."); }
+				if (g_current_flat_initializer.empty()) { yyerror("Lista de inicializacao da matriz nao pode ser vazia."); }
+
+				int declared_rows = stoi($4.literal_value);
+				int declared_cols = stoi($7.literal_value);
+				
+				if (g_current_flat_initializer.size() != (declared_rows * declared_cols)) {
+					yyerror("Numero de elementos no inicializador (" + to_string(g_current_flat_initializer.size()) + ") eh diferente do tamanho da matriz (" + to_string(declared_rows * declared_cols) + ").");
+				}
+				
+				string inferred_type = g_current_flat_initializer[0].tipo;
+				string all_expressions_code;
+
+				for (size_t i = 0; i < g_current_flat_initializer.size(); ++i) {
+					atributos& current_elem = g_current_flat_initializer[i];
+					all_expressions_code += current_elem.traducao;
+					
+					if (inferred_type != current_elem.tipo) {
+						bool cast_valido = (inferred_type == "float" && current_elem.tipo == "int") || (inferred_type == "int" && current_elem.tipo == "float");
+						if (cast_valido) {
+							string casted_temp_label = gentempcode();
+							declararVariavel(inferred_type, casted_temp_label, -1);
+							all_expressions_code += "\t" + casted_temp_label + " = (" + inferred_type + ")" + current_elem.label + ";\n";
+							current_elem.label = casted_temp_label;
+						} else {
+							yyerror("Tipos incompativeis na inicializacao. Esperado " + inferred_type + ", mas encontrado " + current_elem.tipo + ".");
+						}
+					}
+				}
+
+				guardaSimbolos($2.label);
+				Simbolo s = buscar($2.label);
+				atualizar(inferred_type, $2.label, "", "", "", $4.literal_value, $7.literal_value, true);
+				
+				string tipo_c = inferred_type;
+				if (tipo_c == "bool") tipo_c = "int";
+
+				$$.traducao = $4.traducao + $7.traducao;
+				string temp_total_size = gentempcode();
+				declararVariavel("int", temp_total_size, -1);
+				$$.traducao += "\t" + temp_total_size + " = " + $4.literal_value + " * " + $7.literal_value + ";\n";
+				
+				if (inferred_type == "string") {
+					declararVariavel("char**", s.label, -1);
+					$$.traducao += "\t" + s.label + " = (char**) malloc(sizeof(char*) * " + temp_total_size + ");\n";
+				} else {
+					declararVariavel(tipo_c + "*", s.label, -1);
+					$$.traducao += "\t" + s.label + " = (" + tipo_c + "*) malloc(sizeof(" + tipo_c + ") * " + temp_total_size + ");\n";
+				}
+				
+				$$.traducao += all_expressions_code;
+
+				for (size_t i = 0; i < g_current_flat_initializer.size(); ++i) {
+					const atributos& current_elem = g_current_flat_initializer[i];
+					if (inferred_type == "string") {
+						$$.traducao += "\t" + s.label + "[" + to_string(i) + "] = (char*) malloc(sizeof(char) * " + current_elem.tamanho + ");\n";
+						$$.traducao += "\tstrcpy(" + s.label + "[" + to_string(i) + "], " + current_elem.label + ");\n";
+					} else {
+						$$.traducao += "\t" + s.label + "[" + to_string(i) + "] = " + current_elem.label + ";\n";
+					}
+				}
+			}
+			;
+
+
+E 			: '(' E ')'
+			{
+				$$ = $2;
+			}
+			| E '+' E
+			{	
+				traducaoTemp = "";
+				
+				traducaoTemp = cast_implicito(&$$, &$1, &$3, "operacao");
+
+				$$.label = gentempcode();
+					
+				$$.tipo = tipofinal[$1.tipo][$3.tipo];
+				if($$.tipo == "erro") yyerror("Operação com tipos inválidos");
+
+				$$.traducao = $1.traducao + $3.traducao + traducaoTemp +
+					"\t" + $$.label + " = " + $1.label + " + " + $3.label + ";\n";
+
+				declararVariavel($$.tipo, $$.label, -1);
+				
+			}
+			| E '-' E
+			{
+				traducaoTemp = "";
+				
+				traducaoTemp = cast_implicito(&$$, &$1, &$3, "operacao");
+				
+                $$.label = gentempcode();
+                
+				$$.tipo = tipofinal[$1.tipo][$3.tipo];
+				if($$.tipo == "erro" || $$.tipo == "string") yyerror("Operação com tipos inválidos");
+
+                $$.traducao = $1.traducao + $3.traducao + traducaoTemp +
+                    "\t" + $$.label + " = " + $1.label + " - " + $3.label + ";\n";
+
+                declararVariavel($$.tipo, $$.label, -1);
+			}
+			| E '*' E
+			{
+				traducaoTemp = "";
+
+				traducaoTemp = cast_implicito(&$$, &$1, &$3, "operacao");
+
+                $$.label = gentempcode();
+                
+				$$.tipo = tipofinal[$1.tipo][$3.tipo];
+				if($$.tipo == "erro" || $$.tipo == "string") yyerror("Operação com tipos inválidos");
+
+                $$.traducao = $1.traducao + $3.traducao + traducaoTemp +
+                    "\t" + $$.label + " = " + $1.label + " * " + $3.label + ";\n";
+
+                declararVariavel($$.tipo, $$.label, -1);			
+			}
+			| E '/' E
+			{
+				traducaoTemp = "";
+
+				traducaoTemp = cast_implicito(&$$, &$1, &$3, "operacao");
+
+				$$.label = gentempcode();
+                
+				$$.tipo = tipofinal[$1.tipo][$3.tipo];
+				if($$.tipo == "erro" || $$.tipo == "string") yyerror("Operação com tipos inválidos");
+
+                $$.traducao = $1.traducao + $3.traducao + traducaoTemp + "\t" + $$.label + " = " + $1.label + " / " + $3.label + ";\n";
+
+                declararVariavel($$.tipo, $$.label, -1);
+			}
+			| KWD_FLOAT
+			{
+				$$.label = gentempcode();
+				$$.traducao = "\t" + $$.label + " = " + $1.label + ";\n";
+				$$.tipo = "float";
+				declararVariavel($$.tipo, $$.label, -1);
+				$$.literal_value = $1.label;
+			}
+			| KWD_NUM
+			{
+				$$.label = gentempcode();
+				$$.traducao = "\t" + $$.label + " = " + $1.label + ";\n";
+				$$.tipo = "int";
+				declararVariavel($$.tipo, $$.label, -1);
+				$$.literal_value = $1.label;
+			}
+			| KWD_ID
+			{
+				Simbolo variavel;
+
+                if(!verifica_var($1.label)) {
+                    yyerror("Variavel nao declarada.");
+                }
+
+                variavel = buscar($1.label);
+                if(variavel.tipo == "") yyerror("Variavel ainda nao tem um tipo definido");
+
+                $$.label = variavel.label;
+                $$.traducao = "";
+                $$.tipo = variavel.tipo;
+                $$.tamanho = variavel.tamanho;
+                $$.vetor_string = variavel.vetor_string;
+                $$.id = true;				
+			}
+			| KWD_CHAR
+			{
+
+				$$.label = gentempcode();
+				$$.traducao = "\t" + $$.label + " = " + $1.label + ";\n";
+				$$.tipo = "char";
+				$$.tamanho = "1";
+				declararVariavel($$.tipo, $$.label, -1);
+				$$.literal_value = $1.label;
+			}
+			| KWD_BOOL
+			{
+				if($1.label == "true") {
+					$1.label = "1";
+				} else {
+					$1.label = "0";
+				}
+
+				$$.label = $1.label;
+				$$.traducao = "";
+				$$.tipo = "bool";
+			}
+            | E KWD_RELACIONAL E
+    		{	
+				traducaoTemp = "";
+
+				traducaoTemp = cast_implicito(&$$, &$1, &$3, "operacao");
+
+            	$$.label = gentempcode();
+    			$$.traducao = $1.traducao + $3.traducao + traducaoTemp + "\t" + $$.label + " = " + $1.label + " " + $2.label + " " + $3.label + ";\n";
+        		$$.tipo = "bool";
+        		declararVariavel($$.tipo, $$.label, -1);
+        	}
+            | E KWD_OU E
+    		{
+   				$$.label = gentempcode();
+        		$$.traducao = $1.traducao + $3.traducao + "\t" + $$.label + " = " + $1.label + " " + $2.label + " " + $3.label + ";\n";
+        		$$.tipo = "bool";
+    			declararVariavel($$.tipo, $$.label, -1);
+        	}
+            | E KWD_E E
+        	{
+        		$$.label = gentempcode();
+        		$$.traducao = $1.traducao + $3.traducao + "\t" + $$.label + " = " + $1.label + " " + $2.label + " " + $3.label + ";\n";
+        		$$.tipo = "bool";
+        		declararVariavel($$.tipo, $$.label, -1);
+            }
+            | KWD_NEG E
+            {
+	        	$$.label = gentempcode();
+        		$$.traducao = $2.traducao + "\t" + $$.label + " = !" + $2.label + ";\n";
+        		$$.tipo = "bool";
+        		declararVariavel($$.tipo, $$.label, -1);
+        	}
+	    	| KWD_CAST E
+	    	{
+				string temp1 = gentempcode();
+    			string temp2 = gentempcode();
+
+    			declararVariavel($2.tipo, temp1, -1);
+    			declararVariavel($1.tipo, temp2, -1);
+
+    			$$.traducao = $2.traducao +	"\t" + temp1 + " = " + $2.label + ";\n" +"\t" + temp2 + " = " + "(" + $1.tipo + ")" + temp1 + ";\n";
+
+    			$$.label = temp2;
+    			$$.tipo = $1.tipo;
+	    	}
+			|KWD_CADEIA_CHAR
+			{
+				// A função unescape_string já foi chamada no léxico.
+				// O yylval.label agora é a string processada.
+				string str_processada = $1.label;
+				int tamReal = str_processada.length() + 1; // +1 para o '\0'
+
+				$$.label = gentempcode();
+				$$.tipo = "string";
+				$$.tamanho = to_string(tamReal);
+				$$.vetor_string = str_processada;
+
+				// Alocação de memória
+				$$.traducao = "\t" + $$.label + " = (char *) malloc(" + $$.tamanho + " * sizeof(char));\n";
+
+				// --- LAÇO CORRIGIDO PARA "ESCAPAR DE VOLTA" OS CARACTERES ---
+				for(int i = 0; i < str_processada.length(); i++){
+					string char_escapado;
+					char c = str_processada[i];
+					switch (c) {
+						case '\n': char_escapado = "\\n"; break;
+						case '\t': char_escapado = "\\t"; break;
+						case '\\': char_escapado = "\\\\"; break;
+						case '\'': char_escapado = "\\'"; break;
+						case '\"': char_escapado = "\\\""; break;
+						default:   char_escapado = string(1, c); break;
+					}
+					$$.traducao += "\t" + $$.label + "[" + to_string(i) + "] = '" + char_escapado + "';\n";
+				}
+				// Adiciona o terminador nulo no final
+				$$.traducao += "\t" + $$.label + "[" + to_string(str_processada.length()) + "] = '\\0';\n";
+
+				declararVariavel($$.tipo, $$.label, tamReal);
+			}
+			| KWD_ID '[' E ']' '[' E ']'
+			{
+            if (!verifica_var($1.label)) {
+            	yyerror("Matriz '" + $1.label + "' nao declarada.");
+            }
+
+            Simbolo s = buscar($1.label);
+            if (!s.is_matrix) {
+            	yyerror("Variavel '" + $1.label + "' nao eh uma matriz.");
+            }
+            if (!s.tipado) {
+            	yyerror("Matriz '" + $1.label + "' usada antes de qualquer valor ser atribuido a ela.");
+            }
+
+            $$.traducao = $3.traducao + $6.traducao;
+
+			string temp_mult = gentempcode();
+			declararVariavel("int", temp_mult, -1);
+			$$.traducao += "\t" + temp_mult + " = " + $3.label + " * " + s.cols_label + ";\n";
+
+			string temp_index = gentempcode();
+			declararVariavel("int", temp_index, -1);
+			$$.traducao += "\t" + temp_index + " = " + temp_mult + " + " + $6.label + ";\n";
+            
+            $$.label = gentempcode();
+            $$.tipo = s.tipo;
+            declararVariavel($$.tipo, $$.label, -1);
+            $$.traducao += "\t" + $$.label + " = " + s.label + "[" + temp_index + "];\n";
+			}
+			| OPERADORES_UNARIOS
+            ;
+OPERADORES_UNARIOS : KWD_ID KWD_INC
+					{
+        				Simbolo variavel = buscar($1.label);
+        				if (variavel.tipo != "int" && variavel.tipo != "float" && variavel.tipo != "char") {
+            				yyerror("Operador '++' so pode ser aplicado em tipos numericos (int, float, char).");
+        				}
+        				if (!variavel.tipado) {
+            				yyerror("Variavel '" + $1.label + "' usada em operacao antes de ser tipada.");
+        				}
+
+        				$$.label = gentempcode();
+        				$$.tipo = variavel.tipo; 
+        				declararVariavel($$.tipo, $$.label, -1);
+        
+        				$$.traducao = "\t" + $$.label + " = " + variavel.label + ";\n"; 
+        				$$.traducao += "\t" + variavel.label + " = " + variavel.label + " + 1;\n";
+					}
+					| KWD_ID KWD_DEC
+					{
+        				Simbolo variavel = buscar($1.label);
+        				if (variavel.tipo != "int" && variavel.tipo != "float" && variavel.tipo != "char") {
+            				yyerror("Operador '--' so pode ser aplicado em tipos numericos (int, float, char).");
+        				}
+        				if (!variavel.tipado) {
+            				yyerror("Variavel '" + $1.label + "' usada em operacao antes de ser tipada.");
+        				}
+
+        				$$.label = gentempcode();
+        				$$.tipo = variavel.tipo;
+        				declararVariavel($$.tipo, $$.label, -1);
+        
+        				$$.traducao = "\t" + $$.label + " = " + variavel.label + ";\n"; 
+        				$$.traducao += "\t" + variavel.label + " = " + variavel.label + " - 1;\n";
+					}
+					| KWD_INC KWD_ID
+					{
+        				Simbolo variavel = buscar($2.label);
+        				if (variavel.tipo != "int" && variavel.tipo != "float" && variavel.tipo != "char") {
+            				yyerror("Operador '++' so pode ser aplicado em tipos numericos (int, float, char).");
+        				}
+        				if (!variavel.tipado) {
+            				yyerror("Variavel '" + $2.label + "' usada em operacao antes de ser tipada.");
+        				}
+        
+        				$$.traducao = "\t" + variavel.label + " = " + variavel.label + " + 1;\n";
+        
+        				$$.label = variavel.label;
+        				$$.tipo = variavel.tipo;
+					}
+					| KWD_DEC KWD_ID
+					{
+        				Simbolo variavel = buscar($2.label);
+        				if (variavel.tipo != "int" && variavel.tipo != "float" && variavel.tipo != "char") {
+            				yyerror("Operador '--' so pode ser aplicado em tipos numericos (int, float, char).");
+        				}
+        				if (!variavel.tipado) {
+            				yyerror("Variavel '" + $2.label + "' usada em operacao antes de ser tipada.");
+        				}
+
+        				$$.traducao = "\t" + variavel.label + " = " + variavel.label + " - 1;\n";
+        
+        				$$.label = variavel.label;
+        				$$.tipo = variavel.tipo;
+					}
+					;
+%%
+
+#include "lex.yy.c"
+
+int yyparse();
+
+void yyerror(string MSG)
+{
+	cout << MSG << endl;
+	exit (0);
 }
 
-%token <str> INCLUDE_DIRECTIVE
-%token KWD_MAIN KWD_RETURN
-%token KWD_IF KWD_ELSE KWD_PRINTF KWD_SCANF KWD_WHILE KWD_DO
-%token KWD_STRING
-%token <str> STRING_LITERAL
-%token AMPERSAND
-%token ABRE_CHAVE FECHA_CHAVE ABRE_COL FECHA_COL
-%token NEG
-%token <ival> NUM
-%token <fval> FNUM
-%token <str> ID
-%token <str> TIPO
-%token <str> CARACTERE
-%token ATRIB
-%token MAIS MENOS VEZES DIV
-%token ABRE_P FECHA_P
-%token IGUAL DIFERENTE MENOR MAIOR MENORIGUAL MAIORIGUAL
-%token E OU
-%token <ival> BOOLLIT
-%token KWD_FOR
-%token KWD_SWITCH KWD_CASE KWD_DEFAULT
-%token KWD_BREAK KWD_CONTINUE
-
-%right NEG
-%left OU E IGUAL DIFERENTE MENOR MAIOR MENORIGUAL MAIORIGUAL
-%left MAIS MENOS
-%left VEZES DIV
-
-%type <expr_attr> expr fator opt_expr
-%type <atribuicao_guardada_attr> for_incremento
-
-%%
-
-programa:
-    includes_opt 
-    definicao_main
-    ;
-
-includes_opt:
-    | includes_opt include_stmt
-    ;
-
-include_stmt:
-    INCLUDE_DIRECTIVE { printf("%s\n", $1); if ($1) free($1); }
-    ;
-
-definicao_main:
-    TIPO KWD_MAIN ABRE_P FECHA_P {
-        printf("int main() \n{\n");
-        if ($1) free($1);
+void desempilhar_contexto_case() {
+	if (!g_switch_context_stack.empty()) {
+        g_switch_context_stack.pop_back();
+	} else {
+        yyerror("PANICO: Pilha de contexto de switch vazia no cleanup");
     }
-    bloco {
-        imprimir_codigo_cg();
-        printf("}\n");
-    }
-    ;
+}
 
-bloco:
-    ABRE_CHAVE { entrar_escopo(); }
-    lista_comandos_opt
-    FECHA_CHAVE { sair_escopo(); }
-    ;
+string gentempcode()
+{
+	var_temp_qnt++;
+	return "T" + to_string(var_temp_qnt);
+}
 
-lista_comandos_opt:
-    | lista_comandos
-    ;
+void adicionarEscopo()
+{
+	unordered_map<string, Simbolo> escopo;
+	tabela.push_back(escopo);
+}
 
-lista_comandos:
-    lista_comandos comando
-    | comando
-    ;
+int tamanho_string(string traducao){
+	traducaoTemp = "";
+	int tamanho = 0;
+	int i = 0;
 
-comando:
-    decl
-    | string_dyn_decl
-    | atribuicao
-    | retorno_main
-    | if_stmt
-    | while_stmt
-    | do_while_stmt        
-    | printf_stmt
-    | scanf_stmt
-    | expr ';'
-    | bloco
-    | switch_stmt
-    | break_stmt
-    | continue_stmt
-    | for_stmt
-    ;
+	while(traducao[i] != '\0'){
+		if(traducao[i] != '"') tamanho++;
+		i++;
+	}
+	tamanho++;
 
-// NOVA REGRA PARA STRING DINAMICA
-string_dyn_decl:
-    KWD_STRING ID ';' {
-        int id_temp = adicionar_simbolo($2, "dynamic_string", 0);
-        char nome_var_formatado[60];
-        sprintf(nome_var_formatado, "%s_T%d", $2, id_temp);
-        adicionar_declaracao_cg("dynamic_string", nome_var_formatado, 0);
-        if ($2) free($2);
-    }
-    ;
+	return tamanho;
+}
 
-printf_stmt:
-    KWD_PRINTF ABRE_P STRING_LITERAL FECHA_P ';' {
-        char codigo_gerado[300];
-        snprintf(codigo_gerado, sizeof(codigo_gerado), "printf(\"%s\");", $3);
-        adicionar_operacao_cg("%s", codigo_gerado);
-        if ($3) free($3);
-    }
-    ;
+Simbolo buscar(string name)
+{
+	for(int i = tabela.size() - 1; i >= 0; i--) {
+		auto it = tabela[i].find(name);
+		if(!(it == tabela[i].end())) return it->second;
+	}
+	yyerror("Não foi encontrado o símbolo durante a busca!");
+}
 
-scanf_stmt:
-    KWD_SCANF ABRE_P STRING_LITERAL ',' AMPERSAND ID FECHA_P ';' {
-        Simbolo* s = obter_simbolo($6);
-        if (!s) {
-            char error_msg[100];
-            sprintf(error_msg, "Variavel '%s' nao declarada usada no scanf.", $6);
-            yyerror(error_msg);
-            if ($6) free($6);
-            return 1;
-        }
-        // SCANF para string dinamica nao eh seguro/implementado.
-        if (strcmp(s->tipo, "dynamic_string") == 0) {
-            yyerror("Nao e possivel usar scanf diretamente em uma string dinamica (ponteiro).");
-            return 1;
-        }
-        char format_str_cg[256];
-        sprintf(format_str_cg, "\"%s\"", $3);
-        char var_addr_cg[70];
-        // Para fixed_char_array (antiga string), passa o nome direto.
-        if (strcmp(s->tipo, "fixed_char_array") == 0) {
-            sprintf(var_addr_cg, "%s_T%d", s->nome, s->temp_id);
+string unescape_string(const char* s) {
+    string resultado;
+    // Itera pela string, ignorando as aspas do início e do fim.
+    for (int i = 1; s[i] != '\"' && s[i] != '\0'; i++) {
+        if (s[i] == '\\') {
+            i++; // Pula a barra invertida para ver o próximo caractere.
+            switch (s[i]) {
+                case 'n':
+                    resultado += '\n'; // Adiciona um caractere de nova linha REAL.
+                    break;
+                case 't':
+                    resultado += '\t'; // Adiciona um caractere de tabulação.
+                    break;
+                case '\"':
+                    resultado += '\"'; // Adiciona aspas dentro da string.
+                    break;
+                case '\\':
+                    resultado += '\\'; // Adiciona uma barra invertida literal.
+                    break;
+                default:
+                    resultado += s[i]; // Mantém o caractere como está (ex: \z -> z)
+                    break;
+            }
         } else {
-            sprintf(var_addr_cg, "&%s_T%d", s->nome, s->temp_id);
+            resultado += s[i];
         }
-        adicionar_operacao_cg("param %s;", format_str_cg);
-        adicionar_operacao_cg("param %s;", var_addr_cg);
-        adicionar_operacao_cg("call scanf, 2;");
-        if ($3) free($3);
-        if ($6) free($6);
     }
-    ;
+    return resultado;
+}
 
-if_stmt:
-    KWD_IF ABRE_P expr FECHA_P {
-        if (strcmp($3.tipo, "bool") != 0) {
-            yyerror("A expressao em um 'if' deve ser do tipo booleano.");
-            return 1;
-        }
-        int rotulo_saida = novo_rotulo();
-        adicionar_operacao_cg("if_false T%d goto L%d;", $3.temp_id, rotulo_saida);
-        push_rotulo(rotulo_saida);
-    }
-    bloco opt_else
-    ;
+void removerEscopo() 
+{
+	tabela.pop_back();
+}
 
-opt_else:
-    {
-        int rotulo_saida = pop_rotulo();
-        adicionar_operacao_cg("L%d:", rotulo_saida);
-    }
-    | KWD_ELSE {
-        int rotulo_fim = novo_rotulo();
-        adicionar_operacao_cg("goto L%d;", rotulo_fim);
-        int rotulo_else = pop_rotulo();
-        adicionar_operacao_cg("L%d:", rotulo_else);
-        push_rotulo(rotulo_fim);
-    }
-    bloco {
-        int rotulo_fim = pop_rotulo();
-        adicionar_operacao_cg("L%d:", rotulo_fim);
-    }
-    ;
+string retirar_aspas(string traducao, int tamanho){
+	traducaoTemp = "";
 
-while_stmt:
-    KWD_WHILE ABRE_P expr FECHA_P {
-        if (strcmp($3.tipo, "bool") != 0) {
-            yyerror("A expressao do while deve ser booleana.");
-            return 1;
-        }
-        int rotulo_inicio = novo_rotulo();
-        int rotulo_saida = novo_rotulo();
-        adicionar_operacao_cg("L%d:", rotulo_inicio);
-        adicionar_operacao_cg("if_false T%d goto L%d;", $3.temp_id, rotulo_saida);
-        push_rotulo(rotulo_inicio);
-        push_rotulo(rotulo_saida);
-    }
-    bloco {
-        int rotulo_saida = pop_rotulo();
-        int rotulo_inicio = pop_rotulo();
-        adicionar_operacao_cg("goto L%d;", rotulo_inicio);
-        adicionar_operacao_cg("L%d:", rotulo_saida);
-    }
-    ;
+	for(int j = 1; j < tamanho; j++){
+		traducaoTemp += traducao[j];
+	}	
 
-do_while_stmt:
-    KWD_DO {
-        int rotulo_inicio = novo_rotulo();
-        adicionar_operacao_cg("L%d:", rotulo_inicio);
-        push_rotulo(rotulo_inicio);
-    }
-    bloco KWD_WHILE ABRE_P expr FECHA_P ';' {
-        if (strcmp($6.tipo, "bool") != 0) {
-            yyerror("A expressao do do/while deve ser booleana.");
-            return 1;
-        }
-        int rotulo_inicio = pop_rotulo();
-        adicionar_operacao_cg("if_true T%d goto L%d;", $6.temp_id, rotulo_inicio);
-    }
-    ;
+	return traducaoTemp;
+}
 
-switch_stmt:
-    KWD_SWITCH ABRE_P expr FECHA_P {
-        if (strcmp($3.tipo, "int") != 0) {
-            yyerror("A expressao do switch deve ser do tipo 'int'.");
-            return 1;
-        }
-        int rotulo_fim_switch = novo_rotulo();
-        temp_id_switch_expr = $3.temp_id;
-        num_cases = 0;
-        rotulo_default = -1;
-        push_rotulo(rotulo_fim_switch);
-    }
-    ABRE_CHAVE {
-        adicionar_operacao_cg("// Tabela de saltos do Switch");
-    }
-    case_list default_case_opt {
-        for (int i = 0; i < num_cases; i++) {
-            adicionar_operacao_cg("if T%d == %d goto L%d;", temp_id_switch_expr, lista_cases[i].valor_case, lista_cases[i].rotulo);
-        }
-        
-        if (rotulo_default != -1) {
-            adicionar_operacao_cg("goto L%d;", rotulo_default);
-        } else {
-            int rotulo_fim_switch = pilha_rotulos[ponteiro_pilha_rotulos - 1];
-            adicionar_operacao_cg("goto L%d;", rotulo_fim_switch);
-        }
-        adicionar_operacao_cg("// Fim da tabela de saltos");
-    }
-    FECHA_CHAVE {
-        int rotulo_fim_switch = pop_rotulo();
-        adicionar_operacao_cg("L%d: // Fim do Switch", rotulo_fim_switch);
-        temp_id_switch_expr = -1;
-        rotulo_default = -1;
-        num_cases = 0;
-    }
-    ;
+string genlabel()
+{
+    label_qnt++;
+    return "L" + to_string(label_qnt);
+}
 
-case_list:
-    | case_list case_stmt
-    ;
+string string_intermediario(string buffer, string tamanho, string cond, string label)
+{
+    string temp = gentempcode();
+	declararVariavel("char", temp, -1);
+    string saida = "";
+	saida += "\n\t" + tamanho + " = 0;\n"; 
+	saida += "\t" + label + ":\n"; 
+	saida += "\t\t" + temp + " = *" + buffer + ";\n"; 
+	saida += "\t\t" + buffer + " = " + buffer + " + 1;\n";
+	saida += "\t\t" + cond + " = (" + temp + " != '\\0');\n"; 
+	saida += "\t\tif (!" + cond + ") goto " + label + "_end;\n"; 
+	saida += "\t\t" + tamanho + " = " + tamanho + " + 1;\n"; 
+	saida += "\t\tgoto " + label + ";\n"; 
+	saida += "\t" + label + "_end:\n"; 
+	saida += "\t\t" + tamanho + " = " + tamanho + " + 1;\n";
+    return saida;
+}
 
-case_stmt:
-    KWD_CASE NUM ':' {
-        int rotulo_case = novo_rotulo();
-        if (num_cases < MAX_CASES) {
-            lista_cases[num_cases].valor_case = $2;
-            lista_cases[num_cases].rotulo = rotulo_case;
-            num_cases++;
-        } else {
-            yyerror("Numero maximo de 'case' excedido.");
-            return 1;
-        }
-        adicionar_operacao_cg("L%d: // Case %d", rotulo_case, $2);
-    }
-    lista_comandos_opt
-    ;
+void declararVariavel(string tipo, string label, int tam_string) 
+{
+	if (tipo == "bool") tipo = "int";
+	if (tipo == "string") tipo = "char*";
+	
+	if(g_processando_escopo_global){
+		declaracoes_globais.push_back(tipo + " " + label + ";\n");
+	}
+	else {
+		declaracoes_locais.push_back("\t" + tipo + " " + label + ";\n");
+	}
+}
 
-default_case_opt:
-    | KWD_DEFAULT ':' {
-        rotulo_default = novo_rotulo();
-        adicionar_operacao_cg("L%d: // Default", rotulo_default);
-    }
-    lista_comandos_opt
-    ;
+void guardaSimbolos(string nome)
+{
+	Simbolo simbolo;
+	simbolo.label = gentempcode();
+	auto it = tabela.end();
+	(*(--it))[nome] = simbolo;
+}
 
-break_stmt:
-    KWD_BREAK ';' {
-        if (ponteiro_pilha_rotulos < 1) {
-            yyerror("'break' fora de um laco ou switch.");
-            return 1;
-        }
-        int rotulo_saida = pilha_rotulos[ponteiro_pilha_rotulos - 1];
-        adicionar_operacao_cg("goto L%d; // break", rotulo_saida);
-    }
-    ;
+bool verifica_var(string name)
+{
+	for(int i = tabela.size() - 1; i >= 0; i--) {
+		auto it = tabela[i].find(name);
+		if(!(it == tabela[i].end())) return true;
+	}
+	return false;
+}
 
-continue_stmt:
-    KWD_CONTINUE ';' {
-        if (ponteiro_pilha_rotulos < 2) {
-            yyerror("'continue' fora de um laco (while, do-while).");
-            return 1;
-        }
-        int rotulo_inicio = pilha_rotulos[ponteiro_pilha_rotulos - 2];
-        adicionar_operacao_cg("goto L%d; // continue", rotulo_inicio);
-    }
-    ;
-
-retorno_main:
-    KWD_RETURN NUM ';' { adicionar_operacao_cg("return %d;", $2); }
-    ;
-
-// REGRA 'decl' ATUALIZADA PARA LIDAR COM 'char' COMO ARRAY
-decl:
-    TIPO ID ';' {
-        // Regra para int, float, bool e char simples (se desejado no futuro)
-        if (strcmp($1, "char") == 0) {
-            yyerror("Declaracao de 'char' deve ter um tamanho fixo, ex: char nome[10];");
-            return 1;
-        }
-        int id_temp = adicionar_simbolo($2, $1, 0);
-        char nome_var_formatado[60];
-        sprintf(nome_var_formatado, "%s_T%d", $2, id_temp);
-        adicionar_declaracao_cg($1, nome_var_formatado, 0);
-        if ($1) free($1); if ($2) free($2);
-    }
-    | TIPO ID ABRE_COL NUM FECHA_COL ';' {
-        // Regra para char como array de tamanho fixo
-        if (strcmp($1, "char") != 0) {
-            yyerror("Apenas o tipo 'char' pode ser declarado como um array.");
-            return 1;
-        }
-        int id_temp = adicionar_simbolo($2, "fixed_char_array", $4);
-        char nome_var_formatado[80];
-        sprintf(nome_var_formatado, "%s_T%d", $2, id_temp);
-        adicionar_declaracao_cg("fixed_char_array", nome_var_formatado, $4);
-        if ($1) free($1); if ($2) free($2);
-    }
-    ;
-
-atribuicao:
-    ID ATRIB expr ';' {
-        Simbolo* s = obter_simbolo($1);
-        if (!s) {
-            yyerror("Variavel nao declarada."); return 1;
-        }
-        
-        // Logica para o novo 'char' (string de tamanho fixo)
-        if (strcmp(s->tipo, "fixed_char_array") == 0) {
-            if (strcmp($3.tipo, "string_literal") != 0) {
-                yyerror("Atribuicao para um array de char so pode ser com um literal de string.");
-                return 1;
-            }
-            if (strlen($3.str_val) >= s->tamanho) {
-                char error_msg[200];
-                snprintf(error_msg, sizeof(error_msg), "Erro: O texto e grande demais para a variavel '%s'[%d].", s->nome, s->tamanho);
-                yyerror(error_msg);
-                return 1;
-            }
-            char var_name_cg[70];
-            sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
-            adicionar_operacao_cg("strcpy(%s, \"%s\");", var_name_cg, $3.str_val);
-
-        // Logica para o novo 'string' (ponteiro dinamico)
-        } else if (strcmp(s->tipo, "dynamic_string") == 0) {
-            if (strcmp($3.tipo, "string_literal") != 0) {
-                yyerror("Atribuicao para string dinamica so pode ser com um literal de string.");
-                return 1;
-            }
-            char var_name_cg[70];
-            sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
-            adicionar_operacao_cg("%s = \"%s\";", var_name_cg, $3.str_val);
-        
-        // Logica para outros tipos (int, float, bool)
-        } else {
-            char var_name_cg[60];
-            sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
-            int expr_temp_id = $3.temp_id;
-            char expr_tipo[20];
-            strcpy(expr_tipo, $3.tipo);
-
-            if (strcmp(s->tipo, "float") == 0 && strcmp(expr_tipo, "int") == 0) {
-                int novo_temp_cast = temp_count++;
-                char nome_novo_temp_cast_cg[10]; sprintf(nome_novo_temp_cast_cg, "T%d", novo_temp_cast);
-                adicionar_declaracao_cg("float", nome_novo_temp_cast_cg, 0);
-                adicionar_operacao_cg("T%d = (float) T%d;", novo_temp_cast, expr_temp_id);
-                expr_temp_id = novo_temp_cast;
-            }
-            adicionar_operacao_cg("%s = T%d;", var_name_cg, expr_temp_id);
-        }
-        if ($1) free($1);
-    }
-    ;
-
-expr:
-    expr MAIS expr {
-        int res = temp_count++;
-        char tipo_res[20];
-        int id1 = $1.temp_id; char tipo1[20]; strcpy(tipo1, $1.tipo);
-        int id3 = $3.temp_id; char tipo3[20]; strcpy(tipo3, $3.tipo);
-        char nome_temp_res[10];
-        sprintf(nome_temp_res, "T%d", res);
-
-        if (strcmp(tipo1, "float") == 0 && strcmp(tipo3, "int") == 0) {
-            int conv_temp = temp_count++;
-            char nome_conv_temp[10]; sprintf(nome_conv_temp, "T%d", conv_temp);
-            adicionar_declaracao_cg("float", nome_conv_temp, 0);
-            adicionar_operacao_cg("T%d = (float) T%d;", conv_temp, id3);
-            id3 = conv_temp; strcpy(tipo3, "float");
-        } else if (strcmp(tipo1, "int") == 0 && strcmp(tipo3, "float") == 0) {
-            int conv_temp = temp_count++;
-            char nome_conv_temp[10]; sprintf(nome_conv_temp, "T%d", conv_temp);
-            adicionar_declaracao_cg("float", nome_conv_temp, 0);
-            adicionar_operacao_cg("T%d = (float) T%d;", conv_temp, id1);
-            id1 = conv_temp; strcpy(tipo1, "float");
-        }
-
-        if (strcmp(tipo1, "float") == 0 || strcmp(tipo3, "float") == 0) strcpy(tipo_res, "float");
-        else strcpy(tipo_res, "int");
-        adicionar_declaracao_cg(tipo_res, nome_temp_res, 0);
-        adicionar_operacao_cg("T%d = T%d + T%d;", res, id1, id3);
-        $$.temp_id = res; strcpy($$.tipo, tipo_res);
-    }
-    | expr MENOS expr {
-        int res = temp_count++;
-        char tipo_res[20];
-        int id1 = $1.temp_id; char tipo1[20]; strcpy(tipo1, $1.tipo);
-        int id3 = $3.temp_id; char tipo3[20]; strcpy(tipo3, $3.tipo);
-        char nome_temp_res[10];
-        sprintf(nome_temp_res, "T%d", res);
-        if (strcmp(tipo1, "float") == 0 && strcmp(tipo3, "int") == 0) {
-            int conv_temp = temp_count++;
-            char nct[10];
-            sprintf(nct, "T%d", conv_temp);
-            adicionar_declaracao_cg("float", nct, 0);
-            adicionar_operacao_cg("T%d = (float) T%d;", conv_temp, id3);
-            id3 = conv_temp;
-            strcpy(tipo3, "float");
-        }
-        else if (strcmp(tipo1, "int") == 0 && strcmp(tipo3, "float") == 0) {
-            int conv_temp = temp_count++;
-            char nct[10]; sprintf(nct, "T%d", conv_temp);
-            adicionar_declaracao_cg("float", nct, 0);
-            adicionar_operacao_cg("T%d = (float) T%d;", conv_temp, id1);
-            id1 = conv_temp; strcpy(tipo1, "float");
-        }
-        if (strcmp(tipo1, "float") == 0 || strcmp(tipo3, "float") == 0){
-            strcpy(tipo_res, "float");
-        }
-        else {
-            strcpy(tipo_res, "int");
-        }
-        adicionar_declaracao_cg(tipo_res, nome_temp_res, 0);
-        adicionar_operacao_cg("T%d = T%d - T%d;", res, id1, id3);
-        $$.temp_id = res;
-        strcpy($$.tipo, tipo_res);
-    }
-    | expr VEZES expr {
-        int res = temp_count++; char tipo_res[20];
-        int id1 = $1.temp_id; char tipo1[20]; strcpy(tipo1, $1.tipo);
-        int id3 = $3.temp_id; char tipo3[20]; strcpy(tipo3, $3.tipo);
-        char nome_temp_res[10];
-        sprintf(nome_temp_res, "T%d", res);
-        if (strcmp(tipo1, "float") == 0 && strcmp(tipo3, "int") == 0) {
-            int conv_temp = temp_count++;
-            char nct[10]; sprintf(nct, "T%d", conv_temp);
-            adicionar_declaracao_cg("float", nct, 0);
-            adicionar_operacao_cg("T%d = (float) T%d;", conv_temp, id3);
-            id3 = conv_temp; strcpy(tipo3, "float");
-        }
-        else if (strcmp(tipo1, "int") == 0 && strcmp(tipo3, "float") == 0) {
-            int conv_temp = temp_count++;
-            char nct[10];
-            sprintf(nct, "T%d", conv_temp);
-            adicionar_declaracao_cg("float", nct, 0);
-            adicionar_operacao_cg("T%d = (float) T%d;", conv_temp, id1);
-            id1 = conv_temp; strcpy(tipo1, "float");
-        }
-        if (strcmp(tipo1, "float") == 0 || strcmp(tipo3, "float") == 0) {
-            strcpy(tipo_res, "float");
-        }
-        else {
-            strcpy(tipo_res, "int");
-        }
-        adicionar_declaracao_cg(tipo_res, nome_temp_res, 0);
-        adicionar_operacao_cg("T%d = T%d * T%d;", res, id1, id3);
-        $$.temp_id = res; strcpy($$.tipo, tipo_res);
-    }
-    | expr DIV expr {
-        int res = temp_count++; char tipo_res[20];
-        int id1 = $1.temp_id; char tipo1[20];
-        strcpy(tipo1, $1.tipo);
-        int id3 = $3.temp_id; char tipo3[20];
-        strcpy(tipo3, $3.tipo);
-        char nome_temp_res[10];
-        sprintf(nome_temp_res, "T%d", res);
-        if (strcmp(tipo1, "float") == 0 && strcmp(tipo3, "int") == 0) {
-            int conv_temp = temp_count++;
-            char nct[10];
-            sprintf(nct, "T%d", conv_temp);
-            adicionar_declaracao_cg("float", nct, 0);
-            adicionar_operacao_cg("T%d = (float) T%d;", conv_temp, id3);
-            id3 = conv_temp; strcpy(tipo3, "float");
-        }
-        else if (strcmp(tipo1, "int") == 0 && strcmp(tipo3, "float") == 0) {
-            int conv_temp = temp_count++;
-            char nct[10]; sprintf(nct, "T%d", conv_temp);
-            adicionar_declaracao_cg("float", nct, 0);
-            adicionar_operacao_cg("T%d = (float) T%d;", conv_temp, id1);
-            id1 = conv_temp; strcpy(tipo1, "float");
-        }
-        if (strcmp(tipo1, "float") == 0 || strcmp(tipo3, "float") == 0) {
-            strcpy(tipo_res, "float");
-        }
-        else {
-            strcpy(tipo_res, "int");
-        }
-        adicionar_declaracao_cg(tipo_res, nome_temp_res, 0);
-        adicionar_operacao_cg("T%d = T%d / T%d;", res, id1, id3);
-        $$.temp_id = res;
-        strcpy($$.tipo, tipo_res);
-    }
-    | expr IGUAL expr {
-        int res = temp_count++;
-        char nome_temp_res[10]; sprintf(nome_temp_res, "T%d", res);
-        
-        char tipo1[20]; strcpy(tipo1, $1.tipo);
-        char tipo3[20]; strcpy(tipo3, $3.tipo);
-
-        // Se qualquer um dos operandos for um tipo de string, usa strcmp
-        if (strstr(tipo1, "string") || strstr(tipo1, "char_array") || strstr(tipo3, "string") || strstr(tipo3, "char_array")) {
-            char op1_str[300], op2_str[300];
-            
-            // Formata o operando 1
-            if (strcmp($1.tipo, "string_literal") == 0) {
-                snprintf(op1_str, sizeof(op1_str), "\"%s\"", $1.str_val);
-            } else {
-                snprintf(op1_str, sizeof(op1_str), "%s_T%d", $1.nome, $1.temp_id);
-            }
-
-            // Formata o operando 2
-            if (strcmp($3.tipo, "string_literal") == 0) {
-                snprintf(op2_str, sizeof(op2_str), "\"%s\"", $3.str_val);
-            } else {
-                snprintf(op2_str, sizeof(op2_str), "%s_T%d", $3.nome, $3.temp_id);
-            }
-
-            adicionar_declaracao_cg("bool", nome_temp_res, 0);
-            adicionar_operacao_cg("T%d = (strcmp(%s, %s) == 0);", res, op1_str, op2_str);
-        
-        } else { // Caso contrario, usa comparacao numerica
-            adicionar_declaracao_cg("bool", nome_temp_res, 0);
-            adicionar_operacao_cg("T%d = T%d == T%d;", res, $1.temp_id, $3.temp_id);
-        }
-
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-    }
-    | expr DIFERENTE expr {
-        int res = temp_count++;
-        char nt[10]; sprintf(nt, "T%d", res);
-        adicionar_declaracao_cg("bool", nt, 0);
-        adicionar_operacao_cg("T%d = T%d != T%d;", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-    }
-    | expr MENOR expr {
-        int res = temp_count++;
-        char nt[10]; sprintf(nt, "T%d", res);
-        adicionar_declaracao_cg("bool", nt, 0);
-        adicionar_operacao_cg("T%d = T%d < T%d;", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-    }
-    | expr MAIOR expr {
-        int res = temp_count++;
-        char nt[10]; sprintf(nt, "T%d", res);
-         adicionar_declaracao_cg("bool", nt, 0);
-         adicionar_operacao_cg("T%d = T%d > T%d;", res, $1.temp_id, $3.temp_id);
-         $$.temp_id = res;
-         strcpy($$.tipo, "bool");
-    }
-    | expr MENORIGUAL expr {
-        int res = temp_count++;
-        char nt[10]; sprintf(nt, "T%d", res);
-        adicionar_declaracao_cg("bool", nt, 0);
-        adicionar_operacao_cg("T%d = T%d <= T%d;", res, $1.temp_id, $3.temp_id);
-         $$.temp_id = res;
-         strcpy($$.tipo, "bool");
-    }
-    | expr MAIORIGUAL expr {
-        int res = temp_count++;
-        char nt[10]; sprintf(nt, "T%d", res);
-        adicionar_declaracao_cg("bool", nt, 0);
-         adicionar_operacao_cg("T%d = T%d >= T%d;", res, $1.temp_id, $3.temp_id);
-         $$.temp_id = res;
-         strcpy($$.tipo, "bool");
-    }
-    | expr E expr {
-        int res = temp_count++;
-        char nt[10]; sprintf(nt, "T%d", res);
-        adicionar_declaracao_cg("bool", nt, 0);
-         adicionar_operacao_cg("T%d = T%d && T%d;", res, $1.temp_id, $3.temp_id);
-         $$.temp_id = res;
-         strcpy($$.tipo, "bool");
-    }
-    | expr OU expr {
-        int res = temp_count++;
-        char nt[10]; sprintf(nt, "T%d", res);
-        adicionar_declaracao_cg("bool", nt, 0);
-        adicionar_operacao_cg("T%d = T%d || T%d;", res, $1.temp_id, $3.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-    }
-    | NEG expr {
-        int res = temp_count++;
-        char nt[10]; sprintf(nt, "T%d", res);
-        adicionar_declaracao_cg("bool", nt, 0);
-        adicionar_operacao_cg("T%d = !T%d;", res, $2.temp_id);
-        $$.temp_id = res;
-        strcpy($$.tipo, "bool");
-    }
-    | fator
-    ;
-
-fator:
-    ABRE_P expr FECHA_P { $$.temp_id = $2.temp_id; strcpy($$.tipo, $2.tipo); }
-    | ABRE_P TIPO FECHA_P fator {
-        int res = temp_count++;
-        char nome_temp_res[10];
-        sprintf(nome_temp_res, "T%d", res);
-        adicionar_declaracao_cg($2, nome_temp_res, 0);
-        adicionar_operacao_cg("T%d = (%s) T%d;", res, $2, $4.temp_id);
-        $$.temp_id = res; strcpy($$.tipo, $2);
-        if ($2) free($2);
-    }
-    | NUM {
-        int res = temp_count++;
-        char nome_temp_res[10]; sprintf(nome_temp_res, "T%d", res);
-        adicionar_declaracao_cg("int", nome_temp_res, 0);
-        adicionar_operacao_cg("T%d = %d;", res, $1);
-        $$.temp_id = res; strcpy($$.tipo, "int");
-    }
-    | FNUM {
-        int res = temp_count++; char nome_temp_res[10];
-        sprintf(nome_temp_res, "T%d", res);
-        adicionar_declaracao_cg("float", nome_temp_res, 0);
-        adicionar_operacao_cg("T%d = %.2f;", res, $1);
-        $$.temp_id = res; strcpy($$.tipo, "float");
-    }
-    | CARACTERE {
-        int res = temp_count++; char nome_temp_res[10];
-        sprintf(nome_temp_res, "T%d", res);
-        adicionar_declaracao_cg("char", nome_temp_res, 0);
-        adicionar_operacao_cg("T%d = %s;", res, $1);
-        $$.temp_id = res;
-        strcpy($$.tipo, "char");
-        if ($1) free($1);
-    }
-    | BOOLLIT {
-        int res = temp_count++; 
-        char nome_temp_res[10];
-        sprintf(nome_temp_res, "T%d", res);
-        
-        // A Correção 1 já fará esta linha gerar "int T..."
-        adicionar_declaracao_cg("bool", nome_temp_res, 0); 
-        
-        // MUDE ESTA LINHA:
-        // Antes: adicionar_operacao_cg("T%d = %s;", res, ($1 ? "true" : "false"));
-        // Agora:
-        adicionar_operacao_cg("T%d = %d;", res, $1); // $1 já é 1 ou 0 vindo do léxico
-
-        $$.temp_id = res; 
-        strcpy($$.tipo, "bool"); // Mantenha "bool" como tipo *interno* para a checagem de tipos
-    }
-    | STRING_LITERAL {
-        strcpy($$.tipo, "string_literal");
-        strcpy($$.str_val, $1);
-        $$.temp_id = -1;
-        if ($1) free($1);
-    }
-    | ID {
-        Simbolo* s = obter_simbolo($1);
-        if (!s) {
-            char error_msg[100];
-            sprintf(error_msg, "Variavel '%s' nao declarada.", $1);
-            yyerror(error_msg);
-            if ($1) free($1);
-            return 1;
-        }
-
-        // 1. Cria um NOVO temporário para carregar o valor da variável.
-        int novo_temp_id = temp_count++;
-        char nome_novo_temp[20];
-        sprintf(nome_novo_temp, "T%d", novo_temp_id);
-
-        // 2. Declara este novo temporário.
-        adicionar_declaracao_cg(s->tipo, nome_novo_temp, 0);
-
-        // 3. Gera a instrução para carregar o valor da variável no novo temporário.
-        char nome_var_cg[70];
-        sprintf(nome_var_cg, "%s_T%d", s->nome, s->temp_id);
-        adicionar_operacao_cg("%s = %s;", nome_novo_temp, nome_var_cg);
-
-        // 4. Passa o ID do NOVO temporário (que agora contém o valor) para cima.
-        $$.temp_id = novo_temp_id;
-        strcpy($$.tipo, s->tipo);
-        strcpy($$.nome, s->nome); // Mantém o nome original para referência, se necessário
-        
-        if ($1) free($1);
-    }
-    ;
-
-opt_expr:
-    { $$.temp_id = -1; }
-    | expr
-    ;
-
-for_incremento:
-    { $$.temp_id_expr = -1; }
-    | ID ATRIB expr {
-        strcpy($$.nome_id, $1);
-        $$.temp_id_expr = $3.temp_id;
-        if ($1) free($1);
-    }
-    ;
-
-for_stmt:
-    KWD_FOR ABRE_P atribuicao {
-        int rotulo_condicao = novo_rotulo();
-        int rotulo_saida = novo_rotulo();
-        adicionar_operacao_cg("L%d:", rotulo_condicao);
-        push_rotulo(rotulo_condicao);
-        push_rotulo(rotulo_saida);
-    }
-    opt_expr ';' for_incremento FECHA_P bloco {
-        int rotulo_saida = pilha_rotulos[ponteiro_pilha_rotulos - 1];
-        if ($5.temp_id != -1) { 
-            if (strcmp($5.tipo, "bool") != 0) { yyerror("Condicao do 'for' deve ser booleana.");
-            return 1;
-            }
-            adicionar_operacao_cg("if_false T%d goto L%d;", $5.temp_id, rotulo_saida);
-        }
-
-        if ($7.temp_id_expr != -1) {
-            Simbolo* s = obter_simbolo($7.nome_id);
-            if(!s) {
-                char error_msg[100];
-                sprintf(error_msg, "Variavel de incremento '%s' nao declarada.", $7.nome_id);
-                yyerror(error_msg);
-                return 1;
-            }
-            char var_name_cg[70];
-            sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
-            adicionar_operacao_cg("%s = T%d; // Incremento do for", var_name_cg, $7.temp_id_expr);
-        }
-
-        int rotulo_saida_final = pop_rotulo();
-        int rotulo_condicao_final = pop_rotulo();
-        adicionar_operacao_cg("goto L%d;", rotulo_condicao_final);
-        adicionar_operacao_cg("L%d: // Fim do FOR", rotulo_saida_final);
-    }
-    | KWD_FOR ABRE_P ';' {
-        int rotulo_condicao = novo_rotulo();
-        int rotulo_saida = novo_rotulo();
-        adicionar_operacao_cg("L%d:", rotulo_condicao);
-        push_rotulo(rotulo_condicao);
-        push_rotulo(rotulo_saida);
-    }
-    opt_expr ';' for_incremento FECHA_P bloco {
-        int rotulo_saida = pilha_rotulos[ponteiro_pilha_rotulos - 1];
-        if ($5.temp_id != -1) {
-            if (strcmp($5.tipo, "bool") != 0) { yyerror("Condicao do 'for' deve ser booleana.");
-            return 1;
-            }
-            adicionar_operacao_cg("if_false T%d goto L%d;", $5.temp_id, rotulo_saida);
-        }
-
-        if ($7.temp_id_expr != -1) {
-            Simbolo* s = obter_simbolo($7.nome_id);
-            if(!s) {
-                char error_msg[100];
-                sprintf(error_msg, "Variavel de incremento '%s' nao declarada.", $7.nome_id);
-                yyerror(error_msg);
-                return 1;
-            }
-            char var_name_cg[70];
-            sprintf(var_name_cg, "%s_T%d", s->nome, s->temp_id);
-            adicionar_operacao_cg("%s = T%d; // Incremento do for", var_name_cg, $7.temp_id_expr);
-        }
-
-        int rotulo_saida_final = pop_rotulo();
-        int rotulo_condicao_final = pop_rotulo();
-        adicionar_operacao_cg("goto L%d;", rotulo_condicao_final);
-        adicionar_operacao_cg("L%d: // Fim do FOR", rotulo_saida_final);
-    }
-    ;
-%%
-
-int main(int argc, char* argv[]) {
-    if (argc > 1) {
-        FILE *file = fopen(argv[1], "r");
-        if (!file) {
-            perror("Nao foi possivel abrir o arquivo");
-            return 1;
-        }
-        extern FILE *yyin;
-        yyin = file;
+void removerRotulos() {
+	if (!rotulo_condicao.empty()) {
+    	rotulo_condicao.pop_back();
+    } else {
+        yyerror("Tentativa de dar pop na pilha rotulo condicao vazia");
     }
     
-    inicializar_listas_cg();
-    yyparse();
-    liberar_listas_cg();
-    return 0;
+	if (!rotulo_fim.empty()) {
+        rotulo_fim.pop_back();
+    } else {
+        yyerror("Tentativa de dar pop na pilha rotulo fim vazia");
+    }
+					
+	if (!rotulo_inicio.empty()) {
+        rotulo_inicio.pop_back();
+    } else {
+        yyerror("Tentativa de dar pop na pilha rotulo inicio vazia");
+    }
+    
+	if (!rotulo_incremento.empty()) {
+        rotulo_incremento.pop_back();
+    } else {
+        yyerror("Tentativa de dar pop na pilha rotulo incremento vazia");
+	}
+}
+
+void atualizar(string tipo, string nome, string tamanho, string cadeia_char, string atualiza_label, string rows, string cols, bool matrix) {
+	for(int i = tabela.size() - 1; i >= 0; i--) {
+		auto it = tabela[i].find(nome);
+		if(!(it == tabela[i].end())) {
+			if(atualiza_label != "") it->second.label = atualiza_label;
+			
+			if(tipo != "") {
+				it->second.tipo = tipo;
+				it->second.tipado = true;
+			}
+			it->second.tamanho = tamanho;
+			it->second.vetor_string = cadeia_char;
+			it->second.rows_label = rows;
+			it->second.cols_label = cols;
+			it->second.is_matrix = matrix;
+			break;
+		}
+	}
+}
+
+string cast_implicito(atributos* no1, atributos* no2, atributos* no3, string tipo)
+{
+		traducaoTemp = "";
+
+		if (!((no2->tipo == "float" && no3->tipo == "int") || (no2->tipo == "int" && no3->tipo == "float")) ) {
+			return traducaoTemp;
+		}
+
+		if(tipo == "operacao") {
+        	if (no2->tipo == "int" && no3->tipo == "float") {
+        		no1->label = gentempcode();
+        		declararVariavel("float", no1->label, -1);
+        		traducaoTemp += "\t" + no1->label + " = (float)" + no2->label + ";\n";
+        		no2->label = no1->label;
+				no2->tipo = "float";
+        	} else if (no2->tipo == "float" && no3->tipo == "int") {
+				no1->label = gentempcode();
+        		declararVariavel("float", no1->label, -1);
+        		traducaoTemp += "\t" + no1->label + " = (float)" + no3->label + ";\n";
+        		no3->label = no1->label;
+        		no3->tipo = "float";
+        	}
+    	}
+		
+		if(tipo == "atribuicao") {
+        	if (no2->tipo == "int" && no3->tipo == "float") {
+        		no1->label = gentempcode();
+        		declararVariavel("int", no1->label, -1);
+        		traducaoTemp += "\t" + no1->label + " = (int)" + no3->label + ";\n";
+				no3->label = no1->label;
+    		} else if (no2->tipo == "float" && no3->tipo == "int") {
+				no1->label = gentempcode();
+        		declararVariavel("float", no1->label, -1);
+        		traducaoTemp += "\t" + no1->label + " = (float)" + no3->label + ";\n";
+				no3->label = no1->label;
+        	} 
+    	}
+	return traducaoTemp;
+}
+
+int main(int argc, char* argv[])
+{
+	adicionarEscopo();
+
+	traducaoTemp = "";
+	label_qnt = 0;
+	var_temp_qnt = 0;
+	tipofinal["int"]["int"] = "int";
+	tipofinal["float"]["int"] = "float";
+	tipofinal["float"]["float"] = "float";
+	tipofinal["string"]["string"] = "string";
+	tipofinal["int"]["float"] = "float";
+	tipofinal["char"]["int"] = "char";
+	tipofinal["int"]["char"] = "char";
+	tipofinal["char"]["char"] = "char";
+	tipofinal["bool"]["bool"] = "bool";
+	tipofinal["string"]["char"] = "erro";
+	tipofinal["char"]["string"] = "erro";
+	tipofinal["bool"]["int"] = "erro";
+	tipofinal["int"]["bool"] = "erro";
+	tipofinal["float"]["char"] = "erro";
+	tipofinal["char"]["float"] = "erro";
+	tipofinal["bool"]["char"] = "erro";
+	tipofinal["char"]["bool"] = "erro";
+	tipofinal["bool"]["float"] = "erro";
+	tipofinal["float"]["bool"] = "erro";
+	tipofinal["string"]["bool"] = "erro";
+	tipofinal["bool"]["string"] = "erro";
+	tipofinal["string"]["int"] = "erro";
+	tipofinal["int"]["string"] = "erro";
+	tipofinal["string"]["float"] = "erro";
+	tipofinal["float"]["string"] = "erro";
+
+	yyparse();
+
+	return 0;
 }

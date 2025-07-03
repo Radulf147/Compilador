@@ -1,0 +1,24 @@
+def main {
+	var numeroDaSorte;
+	numeroDaSorte = ((10 + 5) * 2);
+	var pi;
+	pi = 3.14159;
+
+	var compiladorFunciona;
+	compiladorFunciona = true;
+
+	var inicial;
+	inicial = 'G';
+
+	var saudacao;
+	saudacao = "Ola, ";
+    saudacao += "Compilador!";
+
+	var matrizIdentidade[2][2] = {{1, 0}, {0, 1}};
+
+	var outraMatriz[2][1];
+	outraMatriz[0][0] = 100;
+	outraMatriz[1][0] = 200;
+
+	output(saudacao, " O numero da sorte e: ", numeroDaSorte, " e o valor de PI e: ", pi);
+}

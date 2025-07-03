@@ -1,0 +1,4 @@
+def main {
+	output("Linha 1.\nLinha 2.\n");
+	output("Teste com\nmultiplas\nquebras de linha.");
+}
