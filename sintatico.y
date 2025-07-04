@@ -39,7 +39,6 @@ struct DefaultInfo {
 
 struct Simbolo
 {
-	// Campos existentes para variáveis e matrizes
 	string label;
 	string tipo = "";
 	string tamanho = "";
@@ -48,12 +47,6 @@ struct Simbolo
 	string rows_label = "";
 	string cols_label = "";
 	bool is_matrix = false;
-
-	// --- NOVOS CAMPOS PARA FUNÇÕES ---
-	bool eh_funcao = false;
-	string tipo_retorno = "void"; // Padrão é não retornar nada
-	vector<string> nomes_parametros;
-	vector<string> tipos_parametros;
 };
 
 struct SwitchContext {
@@ -62,10 +55,10 @@ struct SwitchContext {
     std::string end_label;
 };
 
-/*vetores de declarações das variáveis locais e globais*/
+/vetores de declarações das variáveis locais e globais/
 vector<string> declaracoes_locais;
 vector<string> declaracoes_globais;
-/*variável para saber se estamos no escopo global ainda ou não*/
+/variável para saber se estamos no escopo global ainda ou não/
 bool g_processando_escopo_global = true;
 
 // Nova variável global para coletar os valores da lista de inicialização
@@ -106,7 +99,6 @@ string gentempcode();
 bool verifica_var(string name);
 Simbolo buscar(string name);
 string unescape_string(const char* s);
-string g_funcao_atual;
 
 
 
@@ -115,7 +107,6 @@ string g_funcao_atual;
 %token KWD_NUM KWD_FLOAT KWD_CHAR KWD_BOOL KWD_RELACIONAL KWD_OU KWD_E KWD_NEG KWD_CAST KWD_VAR KWD_CADEIA_CHAR KWD_TIPO_INPUT KWD_PLUS_EQ KWD_MINUS_EQ KWD_MULT_EQ KWD_DIV_EQ
 %token KWD_MAIN KWD_DEF KWD_ID KWD_IF KWD_THEN KWD_ELSE KWD_WHILE KWD_DO KWD_FOR KWD_BREAK KWD_CONTINUE KWD_CPY KWD_CAT KWD_INPUT KWD_OUTPUT KWD_INC KWD_DEC
 %token KWD_SWITCH KWD_CASE KWD_DEFAULT
-%token KWD_RETURN
 // KWD_FIM KWD_ERROR
 %start S
 
@@ -129,129 +120,32 @@ string g_funcao_atual;
 
 %%
 
-S : LISTA_DECLARACOES_GLOBAIS S_MAIN
-  {
-      string codigo = "#include<stdio.h>\n"
-                      "#include<stdlib.h>\n"
-                      "#include<string.h>\n\n";
+S 			:LISTA_COMANDOS_GLOBAIS S_MAIN
+			{
+				string codigo = "#include<stdio.h>\n"
+								"#include<stdlib.h>\n"
+								"#include<string.h>\n\n";
 
-      // Imprime primeiro as declarações de variáveis globais
-      for (const auto& decl : declaracoes_globais) {
-          codigo += decl;
-      }
-      codigo += "\n";
+				for (int i = 0; i < declaracoes_globais.size(); i++) {
+					codigo += declaracoes_globais[i];
+				}
 
-      // Imprime o código de todas as funções definidas
-      codigo += $1.traducao; 
+				codigo += "\nint main() {\n";
 
-      // Monta a função main
-      codigo += "\nint main() {\n";
-      for (const auto& decl : declaracoes_locais) {
-          codigo += decl;
-      }	
-      codigo += "\n" + $2.traducao; // Corpo do main
-      codigo += "\n\treturn 0;\n}";
+				for (int i = 0; i < declaracoes_locais.size(); i++) {
+					codigo += declaracoes_locais[i];
+				}	
 
-      cout << codigo << endl;
-  };
-LISTA_DECLARACOES_GLOBAIS: /* pode ser vazio */
-    {
-        $$.traducao = "";
-    }
-    | LISTA_DECLARACOES_GLOBAIS declaracao_global
-    {
-        $$.traducao = $1.traducao + $2.traducao;
-    }
-    ;
-	declaracao_global: definicao_funcao
-                 | DEC ';'
-                 ;
-	definicao_funcao:
-    KWD_DEF KWD_ID {
-        guardaSimbolos($2.label);
-        atualizar("", $2.label, "", "", "", "", "", false);
-        Simbolo s = buscar($2.label);
-        s.eh_funcao = true;
-        tabela.back()[$2.label] = s;
-        g_funcao_atual = $2.label;
-    }
-    '(' lista_parametros_opt ')' {
-        adicionarEscopo();
-        Simbolo s = buscar(g_funcao_atual);
-        for(size_t i = 0; i < s.nomes_parametros.size(); ++i) {
-            guardaSimbolos(s.nomes_parametros[i]);
-            atualizar(s.tipos_parametros[i], s.nomes_parametros[i], "", "", "", "", "", false);
-        }
-    }
-    BLOCO {
-        string nome_funcao = g_funcao_atual;
-        Simbolo s = buscar(nome_funcao);
-        
-        string params_c = "";
-        if (!s.nomes_parametros.empty()){
-            for(size_t i = 0; i < s.nomes_parametros.size(); ++i) {
-                Simbolo p_sim = buscar(s.nomes_parametros[i]);
-                string tipo_c = p_sim.tipo;
-                if (tipo_c == "string") tipo_c = "char*";
-                if (tipo_c == "bool") tipo_c = "int";
+				codigo += "\n" + $1.traducao;
 
-                params_c += tipo_c + " " + p_sim.label;
-                if (i < s.nomes_parametros.size() - 1) {
-                    params_c += ", ";
-                }
-            }
-        }
+				codigo += "\n" + $2.traducao;
+								
+				codigo += 	"\n\treturn 0;"
+							"\n}";
 
-        string tipo_retorno_c = s.tipo_retorno;
-        if (tipo_retorno_c == "string") tipo_retorno_c = "char*";
-        if (tipo_retorno_c == "bool") tipo_retorno_c = "int";
-
-        $$.traducao = tipo_retorno_c + " " + s.label + "(" + params_c + ") " + $7.traducao + "\n\n";
-        removerEscopo();
-        g_funcao_atual = "";
-    }
-    ;
-
-lista_parametros_opt: /* vazio */
-    | lista_parametros
-    ;
-
-lista_parametros: parametro
-    | lista_parametros ',' parametro
-    ;
-
-parametro: KWD_ID
-    {
-        Simbolo s = buscar(g_funcao_atual);
-        s.nomes_parametros.push_back($1.label);
-        s.tipos_parametros.push_back("int"); // Ainda inferindo como int
-        tabela[tabela.size()-2][$1.label] = s;
-    }
-    ;
-
-lista_parametros: /* vazio */
-    | lista_parametros_nao_vazia
-    ;
-
-lista_parametros_nao_vazia: parametro
-    | lista_parametros_nao_vazia ',' parametro
-    ;
-
-parametro: KWD_VAR KWD_ID
-    {
-        // Para cada parâmetro, ex: "var a"
-        // Adicionamos à lista de parâmetros da função que está sendo definida
-        string nome_funcao = traducaoTemp;
-        Simbolo s = buscar(nome_funcao);
-        
-        // Simplesmente guardamos o nome. O tipo será inferido no futuro.
-        s.nomes_parametros.push_back($2.label);
-        s.tipos_parametros.push_back("int"); // Placeholder, tipo será inferido
-        
-        // Precisamos atualizar o símbolo na tabela
-        // (Isso requer uma pequena mudança na sua função 'atualizar' ou uma nova)
-    }
-    ;
+				cout << codigo << endl;
+			}
+			;
 
 LISTA_COMANDOS_GLOBAIS :
 						{
@@ -603,25 +497,6 @@ COMANDO 	: E ';'
 
 				atualizar($$.tipo, $3.label, $$.tamanho, cat, simbolo1.label, "", "", false); 
 			}
-
-			| KWD_RETURN E ';' // <-- ADIÇÃO AQUI
-        {
-            if (g_funcao_atual.empty()) {
-                yyerror("Comando 'return' encontrado fora de uma funcao.");
-            }
-
-            // Ação: Gera o código C para o retorno.
-            $$.traducao = $2.traducao + "\treturn " + $2.label + ";\n";
-
-            // Inferência do tipo de retorno da função
-            Simbolo s = buscar(g_funcao_atual);
-            if (s.tipo_retorno == "void") { // Se for o primeiro return encontrado
-                s.tipo_retorno = $2.tipo;
-                // Atualiza o símbolo na tabela
-                tabela[tabela.size()-2][g_funcao_atual] = s;
-            }
-        }
-
 			;
 SWITCH_SETUP :
             {
@@ -871,7 +746,7 @@ ATRI 		:KWD_ID '=' E
 						string temp_total_size = gentempcode();
 						declararVariavel("int", temp_total_size, -1);
 						$$.traducao += "\t" + temp_total_size + " = " + s.rows_label + " * " + s.cols_label + ";\n";
-						$$.traducao += "\t" + s.label + " = (char**) malloc(sizeof(char*) * " + temp_total_size + ");\n";
+						$$.traducao += "\t" + s.label + " = (char*) malloc(sizeof(char) * " + temp_total_size + ");\n";
 						
 					} else {
 						string tipo_c_ptr = inferred_type;
@@ -1198,7 +1073,7 @@ DEC			:KWD_VAR KWD_ID
 				
 				if (inferred_type == "string") {
 					declararVariavel("char**", s.label, -1);
-					$$.traducao += "\t" + s.label + " = (char**) malloc(sizeof(char*) * " + temp_total_size + ");\n";
+					$$.traducao += "\t" + s.label + " = (char*) malloc(sizeof(char) * " + temp_total_size + ");\n";
 				} else {
 					declararVariavel(tipo_c + "*", s.label, -1);
 					$$.traducao += "\t" + s.label + " = (" + tipo_c + "*) malloc(sizeof(" + tipo_c + ") * " + temp_total_size + ");\n";
